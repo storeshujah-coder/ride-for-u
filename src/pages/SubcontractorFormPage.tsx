@@ -25,7 +25,7 @@ export function SubcontractorFormPage() {
   const [status, setStatus] = useState<EntityStatus>(existing?.status || 'Active');
   const [notes, setNotes] = useState(existing?.notes || '');
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { toast('Name is required', 'error'); return; }
     const data = {
@@ -38,11 +38,11 @@ export function SubcontractorFormPage() {
       notes: notes.trim(),
     };
     if (isEdit && id) {
-      updateSubcontractor(id, data);
+      await updateSubcontractor(id, data);
       toast('Subcontractor updated successfully', 'success');
       navigate(`/subcontractors/${id}`);
     } else {
-      const s = addSubcontractor(data);
+      const s = await addSubcontractor(data);
       toast('Subcontractor added successfully', 'success');
       navigate(`/subcontractors/${s.id}`);
     }

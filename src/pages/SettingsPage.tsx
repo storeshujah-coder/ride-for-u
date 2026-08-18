@@ -21,9 +21,9 @@ export function SettingsPage() {
   const [editingCat, setEditingCat] = useState<string | null>(null);
   const [catName, setCatName] = useState('');
 
-  const handleSave = (e: FormEvent) => {
+  const handleSave = async (e: FormEvent) => {
     e.preventDefault();
-    updateSettings({
+    await updateSettings({
       companyName: companyName.trim() || 'Ride for U',
       currency: currency.trim() || 'PKR',
       commissionRate: Number(commissionRate) || 0,
@@ -41,11 +41,11 @@ export function SettingsPage() {
     setCatName(c.name);
     setCatModalOpen(true);
   };
-  const handleCategorySubmit = (e: FormEvent) => {
+  const handleCategorySubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!catName.trim()) { toast('Category name is required', 'error'); return; }
-    if (editingCat) { updateCategory(editingCat, catName.trim()); toast('Category updated', 'success'); }
-    else { addCategory(catName.trim()); toast('Category added', 'success'); }
+    if (editingCat) { await updateCategory(editingCat, catName.trim()); toast('Category updated', 'success'); }
+    else { await addCategory(catName.trim()); toast('Category added', 'success'); }
     setCatModalOpen(false);
   };
   const handleDeleteCategory = (cId: string) => {
@@ -53,7 +53,7 @@ export function SettingsPage() {
     confirm({
       title: 'Delete Category',
       message: `Delete category "${c?.name}"?`,
-      onConfirm: () => { deleteCategory(cId); toast('Category deleted', 'success'); },
+      onConfirm: async () => { await deleteCategory(cId); toast('Category deleted', 'success'); },
     });
   };
 

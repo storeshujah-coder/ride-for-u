@@ -132,7 +132,7 @@ export function ExpensesPage() {
     setExpenseModalOpen(true);
   };
 
-  const handleExpenseSubmit = (e: FormEvent) => {
+  const handleExpenseSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const amt = Number(expAmount) || 0;
     if (amt <= 0) { toast('Amount must be greater than 0', 'error'); return; }
@@ -156,10 +156,10 @@ export function ExpensesPage() {
       amount: amt, paymentMethod: expPayment, remarks: expRemarks,
     };
     if (editingExpenseId) {
-      updateBusinessExpense(editingExpenseId, data);
+      await updateBusinessExpense(editingExpenseId, data);
       toast('Expense updated', 'success');
     } else {
-      addBusinessExpense(data);
+      await addBusinessExpense(data);
       toast('Expense added', 'success');
     }
     setExpenseModalOpen(false);
@@ -170,7 +170,7 @@ export function ExpensesPage() {
     confirm({
       title: 'Delete Expense',
       message: `Delete ${catName} expense — ${formatPKR(exp.amount)} for ${exp.relatedToName}?`,
-      onConfirm: () => { deleteBusinessExpense(exp.id); toast('Expense deleted', 'success'); },
+      onConfirm: async () => { await deleteBusinessExpense(exp.id); toast('Expense deleted', 'success'); },
     });
   };
 
@@ -181,11 +181,11 @@ export function ExpensesPage() {
     if (!c) return;
     setEditingCat(cId); setCatName(c.name); setCatModalOpen(true);
   };
-  const handleCategorySubmit = (e: FormEvent) => {
+  const handleCategorySubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!catName.trim()) { toast('Category name is required', 'error'); return; }
-    if (editingCat) { updateCategory(editingCat, catName.trim()); toast('Category updated', 'success'); }
-    else { addCategory(catName.trim()); toast('Category added', 'success'); }
+    if (editingCat) { await updateCategory(editingCat, catName.trim()); toast('Category updated', 'success'); }
+    else { await addCategory(catName.trim()); toast('Category added', 'success'); }
     setCatModalOpen(false);
   };
   const handleDeleteCategory = (cId: string) => {
@@ -193,7 +193,7 @@ export function ExpensesPage() {
     confirm({
       title: 'Delete Category',
       message: `Delete category "${c?.name}"?`,
-      onConfirm: () => { deleteCategory(cId); toast('Category deleted', 'success'); },
+      onConfirm: async () => { await deleteCategory(cId); toast('Category deleted', 'success'); },
     });
   };
 

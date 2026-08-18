@@ -29,7 +29,7 @@ export function DriverFormPage() {
   const [status, setStatus] = useState<EntityStatus>(existing?.status || 'Active');
   const [notes, setNotes] = useState(existing?.notes || '');
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
       toast('Full name is required', 'error');
@@ -48,11 +48,11 @@ export function DriverFormPage() {
       notes: notes.trim(),
     };
     if (isEdit && id) {
-      updateDriver(id, data);
+      await updateDriver(id, data);
       toast('Driver updated successfully', 'success');
       navigate(`/drivers/${id}`);
     } else {
-      const d = addDriver(data);
+      const d = await addDriver(data);
       toast('Driver added successfully', 'success');
       navigate(`/drivers/${d.id}`);
     }

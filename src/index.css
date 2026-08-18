@@ -28,15 +28,77 @@
 }
 
 @media print {
-  body { background: white !important; }
-  .print\:hidden { display: none !important; }
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  aside, header, nav, .print\:hidden {
+    display: none !important;
+  }
+
   .print-area {
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    background: transparent !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
-  @page {
-    size: A4;
-    margin: 1.5cm;
+
+  /* Compact typography & spacing for 1-page fit */
+  .print-area h1 {
+    font-size: 20px !important;
+    margin-bottom: 2px !important;
+    line-height: 1.2 !important;
+  }
+
+  .print-area h2 {
+    font-size: 11px !important;
+    margin-bottom: 4px !important;
+    letter-spacing: 0.05em !important;
+  }
+
+  .print-area .mb-6 {
+    margin-bottom: 10px !important;
+  }
+
+  .print-area .pb-4 {
+    padding-bottom: 6px !important;
+  }
+
+  .print-area table {
+    font-size: 10.5px !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .print-area th,
+  .print-area td {
+    padding: 3px 6px !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  .print-area tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-area .max-w-sm {
+    max-width: 280px !important;
   }
 }

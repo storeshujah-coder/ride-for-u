@@ -28,7 +28,7 @@ export function VehicleFormPage() {
   const [status, setStatus] = useState<EntityStatus>(existing?.status || 'Active');
   const [notes, setNotes] = useState(existing?.notes || '');
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!number.trim()) {
       toast('Vehicle number is required', 'error');
@@ -45,11 +45,11 @@ export function VehicleFormPage() {
       notes: notes.trim(),
     };
     if (isEdit && id) {
-      updateVehicle(id, data);
+      await updateVehicle(id, data);
       toast('Vehicle updated successfully', 'success');
       navigate(`/vehicles/${id}`);
     } else {
-      const v = addVehicle(data);
+      const v = await addVehicle(data);
       toast('Vehicle added successfully', 'success');
       navigate(`/vehicles/${v.id}`);
     }

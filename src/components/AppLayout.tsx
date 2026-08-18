@@ -2,30 +2,35 @@ import { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Car, User, Users, FileText, BarChart3, Settings,
-  LogOut, Menu, X, Truck, Wallet,
+  LogOut, Menu, X, Truck, Wallet, Shield, Crown,
 } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
+import type { ModuleKey } from '@/types';
 
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/vehicles', label: 'Vehicles', icon: Car },
-  { to: '/drivers', label: 'Drivers', icon: User },
-  { to: '/subcontractors', label: 'Subcontractors', icon: Users },
-  { to: '/monthly-records', label: 'Monthly Records', icon: FileText },
-  { to: '/expenses', label: 'Expenses', icon: Wallet },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/settings', label: 'Settings', icon: Settings },
+const NAV_ITEMS: { to: string; label: string; icon: typeof Car; module: ModuleKey }[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, module: 'dashboard' },
+  { to: '/vehicles', label: 'Vehicles', icon: Car, module: 'vehicles' },
+  { to: '/drivers', label: 'Drivers', icon: User, module: 'drivers' },
+  { to: '/subcontractors', label: 'Subcontractors', icon: Users, module: 'subcontractors' },
+  { to: '/monthly-records', label: 'Monthly Records', icon: FileText, module: 'monthlyRecords' },
+  { to: '/expenses', label: 'Expenses', icon: Wallet, module: 'expenses' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports' },
+  { to: '/users', label: 'Users', icon: Shield, module: 'users' },
+  { to: '/settings', label: 'Settings', icon: Settings, module: 'settings' },
 ];
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { settings } = useStore();
+  const { settings, currentUser, canAccessModule, logout } = useStore();
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    sessionStorage.removeItem('rfu-auth');
+    logout();
     navigate('/login');
   };
+
+  const visibleItems = NAV_ITEMS.filter((item) => canAccessModule(item.module));
+  const isSuper = currentUser?.role === 'super_admin';
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
@@ -40,7 +45,7 @@ export function AppLayout() {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           return (
             <NavLink
@@ -64,10 +69,27 @@ export function AppLayout() {
 
       <div className="px-3 py-3 border-t border-slate-100 space-y-1">
         <div className="flex items-center gap-3 px-3 py-2">
-          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-600">
-            {settings.adminName.charAt(0).toUpperCase()}
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
+              isSuper
+                ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200'
+                : 'bg-slate-200 text-slate-600'
+            }`}
+          >
+            {isSuper ? (
+              <Crown className="w-4 h-4" />
+            ) : (
+              (currentUser?.fullName.charAt(0).toUpperCase() || settings.adminName.charAt(0).toUpperCase())
+            )}
           </div>
-          <span className="text-sm font-medium text-slate-600">{settings.adminName}</span>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-slate-700 truncate">
+              {currentUser?.fullName || settings.adminName}
+            </div>
+            <div className="text-[11px] text-slate-400 truncate">
+              {isSuper ? 'Super Admin' : currentUser?.role === 'staff' ? 'Staff' : 'User'}
+            </div>
+          </div>
         </div>
         <button
           onClick={handleLogout}
@@ -81,17 +103,15 @@ export function AppLayout() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-60 flex-shrink-0 bg-white border-r border-slate-200 fixed inset-y-0 left-0 z-30">
+    <div className="min-h-screen bg-slate-50 flex print:bg-white print:block">
+      <aside className="hidden lg:flex w-60 flex-shrink-0 bg-white border-r border-slate-200 fixed inset-y-0 left-0 z-30 print:hidden">
         <SidebarContent />
       </aside>
 
-      {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-40">
+        <div className="lg:hidden fixed inset-0 z-40 print:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 inset-y-0 w-64 bg-white shadow-xl animate-slide-in-left">
+          <aside className="absolute left-0 inset-y-0 w-64 bg-white shadow-xl animate-slide-in-left print:hidden">
             <button
               onClick={() => setMobileOpen(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
@@ -103,10 +123,8 @@ export function AppLayout() {
         </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 lg:ml-60 min-w-0">
-        {/* Mobile header */}
-        <header className="lg:hidden sticky top-0 z-20 bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3">
+      <div className="flex-1 lg:ml-60 min-w-0 print:ml-0 print:p-0">
+        <header className="lg:hidden sticky top-0 z-20 bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 print:hidden">
           <button
             onClick={() => setMobileOpen(true)}
             className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600"
@@ -121,7 +139,7 @@ export function AppLayout() {
           </div>
         </header>
 
-        <main className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
+        <main className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto print:p-0 print:m-0 print:max-w-full">
           <Outlet />
         </main>
       </div>

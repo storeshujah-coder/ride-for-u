@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { type ReactNode, useEffect } from 'react';
-import { StoreProvider } from '@/store/StoreContext';
+import { type ReactNode, useEffect, useMemo } from 'react';
+import { StoreProvider, useStore } from '@/store/StoreContext';
 import { ToastProvider } from '@/components/Toast';
 import { ConfirmProvider } from '@/components/Confirm';
 import { AppLayout } from '@/components/AppLayout';
@@ -25,12 +25,79 @@ import { DriverReportPage } from '@/pages/DriverReportPage';
 import { SubcontractorReportPage } from '@/pages/SubcontractorReportPage';
 import { BusinessExpenseReportPage } from '@/pages/BusinessExpenseReportPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { UsersListPage } from '@/pages/UsersListPage';
+import { UserFormPage } from '@/pages/UserFormPage';
+import type { ModuleKey, PermissionAction } from '@/types';
+import { ALL_MODULES } from '@/types';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const auth = sessionStorage.getItem('rfu-auth');
+  const { currentUser } = useStore();
   const location = useLocation();
-  if (!auth) return <Navigate to="/login" replace />;
+  const hasAuth = sessionStorage.getItem('rfu-auth');
+  if (!currentUser && !hasAuth) return <Navigate to="/login" replace state={{ from: location }} />;
   return <>{children}</>;
+}
+
+function PermissionGuard({
+  module: m,
+  action = 'view',
+  children,
+}: {
+  module: ModuleKey;
+  action?: PermissionAction;
+  children: ReactNode;
+}) {
+  const { hasPermission, currentUser, canAccessModule } = useStore();
+  const location = useLocation();
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!hasPermission(m, action)) {
+    const fallback = useMemo(() => {
+      for (const mod of ALL_MODULES as ModuleKey[]) {
+        if (canAccessModule(mod)) {
+          const map: Record<ModuleKey, string> = {
+            dashboard: '/dashboard',
+            vehicles: '/vehicles',
+            drivers: '/drivers',
+            subcontractors: '/subcontractors',
+            monthlyRecords: '/monthly-records',
+            expenses: '/expenses',
+            reports: '/reports',
+            users: '/users',
+            settings: '/settings',
+          };
+          return map[mod] || '/dashboard';
+        }
+      }
+      return null;
+    }, [canAccessModule]);
+    if (!fallback) return <Navigate to="/login" replace />;
+    if (location.pathname !== fallback) return <Navigate to={fallback} replace />;
+    return null;
+  }
+  return <>{children}</>;
+}
+
+function RootRedirect() {
+  const { canAccessModule } = useStore();
+  for (const mod of ALL_MODULES as ModuleKey[]) {
+    if (canAccessModule(mod)) {
+      const map: Record<ModuleKey, string> = {
+        dashboard: '/dashboard',
+        vehicles: '/vehicles',
+        drivers: '/drivers',
+        subcontractors: '/subcontractors',
+        monthlyRecords: '/monthly-records',
+        expenses: '/expenses',
+        reports: '/reports',
+        users: '/users',
+        settings: '/settings',
+      };
+      return <Navigate to={map[mod]} replace />;
+    }
+  }
+  return <Navigate to="/login" replace />;
 }
 
 function ScrollToTop() {
@@ -46,29 +113,40 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/vehicles" element={<VehiclesListPage />} />
-          <Route path="/vehicles/add" element={<VehicleFormPage />} />
-          <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
-          <Route path="/drivers" element={<DriversListPage />} />
-          <Route path="/drivers/add" element={<DriverFormPage />} />
-          <Route path="/drivers/:id" element={<DriverDetailPage />} />
-          <Route path="/subcontractors" element={<SubcontractorsListPage />} />
-          <Route path="/subcontractors/add" element={<SubcontractorFormPage />} />
-          <Route path="/subcontractors/:id" element={<SubcontractorDetailPage />} />
-          <Route path="/monthly-records" element={<MonthlyRecordsListPage />} />
-          <Route path="/monthly-records/add" element={<MonthlyRecordAddPage />} />
-          <Route path="/monthly-records/:id" element={<MonthlyRecordDetailPage />} />
-          <Route path="/expenses" element={<ExpensesPage />} />
-          <Route path="/reports" element={<ReportsIndexPage />} />
-          <Route path="/reports/vehicle" element={<VehicleReportPage />} />
-          <Route path="/reports/driver" element={<DriverReportPage />} />
-          <Route path="/reports/subcontractor" element={<SubcontractorReportPage />} />
-          <Route path="/reports/business-expenses" element={<BusinessExpenseReportPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/dashboard" element={<PermissionGuard module="dashboard"><DashboardPage /></PermissionGuard>} />
+
+          <Route path="/vehicles" element={<PermissionGuard module="vehicles"><VehiclesListPage /></PermissionGuard>} />
+          <Route path="/vehicles/add" element={<PermissionGuard module="vehicles" action="add"><VehicleFormPage /></PermissionGuard>} />
+          <Route path="/vehicles/:id" element={<PermissionGuard module="vehicles"><VehicleDetailPage /></PermissionGuard>} />
+
+          <Route path="/drivers" element={<PermissionGuard module="drivers"><DriversListPage /></PermissionGuard>} />
+          <Route path="/drivers/add" element={<PermissionGuard module="drivers" action="add"><DriverFormPage /></PermissionGuard>} />
+          <Route path="/drivers/:id" element={<PermissionGuard module="drivers"><DriverDetailPage /></PermissionGuard>} />
+
+          <Route path="/subcontractors" element={<PermissionGuard module="subcontractors"><SubcontractorsListPage /></PermissionGuard>} />
+          <Route path="/subcontractors/add" element={<PermissionGuard module="subcontractors" action="add"><SubcontractorFormPage /></PermissionGuard>} />
+          <Route path="/subcontractors/:id" element={<PermissionGuard module="subcontractors"><SubcontractorDetailPage /></PermissionGuard>} />
+
+          <Route path="/monthly-records" element={<PermissionGuard module="monthlyRecords"><MonthlyRecordsListPage /></PermissionGuard>} />
+          <Route path="/monthly-records/add" element={<PermissionGuard module="monthlyRecords" action="add"><MonthlyRecordAddPage /></PermissionGuard>} />
+          <Route path="/monthly-records/:id" element={<PermissionGuard module="monthlyRecords"><MonthlyRecordDetailPage /></PermissionGuard>} />
+
+          <Route path="/expenses" element={<PermissionGuard module="expenses"><ExpensesPage /></PermissionGuard>} />
+
+          <Route path="/reports" element={<PermissionGuard module="reports"><ReportsIndexPage /></PermissionGuard>} />
+          <Route path="/reports/vehicle" element={<PermissionGuard module="reports"><VehicleReportPage /></PermissionGuard>} />
+          <Route path="/reports/driver" element={<PermissionGuard module="reports"><DriverReportPage /></PermissionGuard>} />
+          <Route path="/reports/subcontractor" element={<PermissionGuard module="reports"><SubcontractorReportPage /></PermissionGuard>} />
+          <Route path="/reports/business-expenses" element={<PermissionGuard module="reports"><BusinessExpenseReportPage /></PermissionGuard>} />
+
+          <Route path="/users" element={<PermissionGuard module="users"><UsersListPage /></PermissionGuard>} />
+          <Route path="/users/add" element={<PermissionGuard module="users" action="add"><UserFormPage /></PermissionGuard>} />
+          <Route path="/users/:id" element={<PermissionGuard module="users" action="edit"><UserFormPage /></PermissionGuard>} />
+
+          <Route path="/settings" element={<PermissionGuard module="settings"><SettingsPage /></PermissionGuard>} />
         </Route>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="*" element={<RootRedirect />} />
       </Routes>
     </>
   );

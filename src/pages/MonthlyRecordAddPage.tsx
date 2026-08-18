@@ -1,11 +1,11 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useState, useMemo, useRef, useEffect, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Save, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Save, Plus, Trash2, ChevronLeft, ChevronRight, Search, X, Car } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
 import { useToast } from '@/components/Toast';
-import { PageHeader, Card, Button, Select, EmptyState } from '@/components/ui';
+import { PageHeader, Card, Button, EmptyState } from '@/components/ui';
 import { formatPKR, formatMonth, daysInMonth, generateMonthOptions } from '@/utils/calc';
-import type { DailyRecord, RouteEntry, MonthlyRecord } from '@/types';
+import type { DailyRecord, RouteEntry, MonthlyRecord, Vehicle } from '@/types';
 
 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -16,6 +16,120 @@ interface DayEntry {
   details: string;
   routes: RouteEntry[];
   entryType: 'quick' | 'detailed';
+}
+
+function SearchableVehicleSelect({
+  vehicles,
+  value,
+  onChange,
+}: {
+  vehicles: Vehicle[];
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const sortedVehicles = useMemo(() => {
+    if (!search.trim()) return vehicles;
+    const q = search.toLowerCase().trim();
+    return [...vehicles].sort((a, b) => {
+      const aMatch = a.number.toLowerCase().includes(q) || a.model.toLowerCase().includes(q) ? 1 : 0;
+      const bMatch = b.number.toLowerCase().includes(q) || b.model.toLowerCase().includes(q) ? 1 : 0;
+      if (aMatch !== bMatch) return bMatch - aMatch;
+      const aStarts = a.number.toLowerCase().startsWith(q) || a.model.toLowerCase().startsWith(q) ? 1 : 0;
+      const bStarts = b.number.toLowerCase().startsWith(q) || b.model.toLowerCase().startsWith(q) ? 1 : 0;
+      if (aStarts !== bStarts) return bStarts - aStarts;
+      return 0;
+    });
+  }, [vehicles, search]);
+
+  const selectedVehicle = vehicles.find((v) => v.id === value);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <label className="block text-sm font-medium text-slate-700 mb-1.5">
+        Vehicle <span className="text-red-500">*</span>
+      </label>
+      <div className="relative">
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+          <Search className="w-4 h-4" />
+        </div>
+        <input
+          type="text"
+          value={open ? search : (selectedVehicle ? `${selectedVehicle.number} — ${selectedVehicle.model}` : '')}
+          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => { setOpen(true); setSearch(''); }}
+          placeholder="Type vehicle number or model..."
+          className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+        />
+        {(search || value) && (
+          <button
+            type="button"
+            onClick={() => { setSearch(''); onChange(''); setOpen(false); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-30 w-full mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          {sortedVehicles.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-slate-400">
+              <Car className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+              No vehicles found
+            </div>
+          ) : (
+            sortedVehicles.map((v) => {
+              const isMatch = search.trim() && (v.number.toLowerCase().includes(search.toLowerCase().trim()) || v.model.toLowerCase().includes(search.toLowerCase().trim()));
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => { onChange(v.id); setOpen(false); setSearch(''); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm transition border-l-2 ${
+                    value === v.id
+                      ? 'bg-sky-50 border-sky-500 text-sky-700 font-medium'
+                      : isMatch
+                      ? 'bg-amber-50/60 border-transparent hover:bg-amber-50 text-slate-800'
+                      : 'border-transparent hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold">{v.number}</span>
+                      <span className="mx-1.5 text-slate-300">—</span>
+                      <span className="text-slate-600">{v.model}</span>
+                    </div>
+                    {isMatch && (
+                      <span className="text-[10px] uppercase tracking-wide text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full font-medium">
+                        Match
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {v.type} · {v.ownerType}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function MonthlyRecordAddPage() {
@@ -123,7 +237,7 @@ export function MonthlyRecordAddPage() {
     return Number(d.amount) > 0 || d.details.trim() !== '';
   }).length;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!vehicleId) { toast('Please select a vehicle', 'error'); return; }
     setSaving(true);
     const dailyData: Omit<DailyRecord, 'id'>[] = dayEntries.map((d) => {
@@ -134,7 +248,7 @@ export function MonthlyRecordAddPage() {
       }
       return { date: d.date, amount: Number(d.amount) || 0, details: d.details, routes: [], entryType: 'quick' as const };
     });
-    const rec = saveMonthlyRecordBulk(vehicleId, month, dailyData);
+    const rec = await saveMonthlyRecordBulk(vehicleId, month, dailyData);
     setSaving(false);
     toast(`Monthly record saved — ${filledDays} day${filledDays !== 1 ? 's' : ''} entered`, 'success');
     navigate(`/monthly-records/${rec.id}`);
@@ -168,10 +282,8 @@ export function MonthlyRecordAddPage() {
           {/* Selection bar */}
           <Card className="p-5 mb-6">
             <form onSubmit={handleGenerate} className="flex flex-col sm:flex-row gap-4 sm:items-end">
-              <div className="flex-1 max-w-xs">
-                <Select label="Vehicle" value={vehicleId} onChange={setVehicleId}
-                  options={vehicles.map((v) => ({ value: v.id, label: `${v.number} — ${v.model}` }))}
-                  placeholder="Select vehicle" required />
+              <div className="flex-1 max-w-sm">
+                <SearchableVehicleSelect vehicles={vehicles} value={vehicleId} onChange={setVehicleId} />
               </div>
               <div className="flex-1 max-w-xs">
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Month / Year</label>
