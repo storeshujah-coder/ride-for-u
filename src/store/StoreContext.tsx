@@ -190,6 +190,8 @@ interface StoreContextValue {
 
   login: (email: string, password: string) => Promise<User | null>;
   logout: () => Promise<void>;
+  resetPasswordForEmail: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   getCurrentUser: () => User | null;
   hasPermission: (module: ModuleKey, action: PermissionAction) => boolean;
   canAccessModule: (module: ModuleKey) => boolean;
@@ -493,6 +495,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCurrentUser(null);
     try { sessionStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
     try { sessionStorage.removeItem('rfu-auth'); } catch {}
+  }, []);
+
+  const resetPasswordForEmail = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
+    if (error) {
+      console.error('resetPasswordForEmail error:', error);
+      throw new Error(error.message);
+    }
+  }, []);
+
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      console.error('updatePassword error:', error);
+      throw new Error(error.message);
+    }
   }, []);
 
   const getCurrentUser = useCallback((): User | null => currentUser, [currentUser]);
@@ -1240,7 +1260,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value: StoreContextValue = {
     vehicles, drivers, subcontractors, monthlyRecords, categories, salaries, activity, settings, businessExpenses,
     users, currentUser,
-    login, logout, getCurrentUser, hasPermission, canAccessModule,
+    login, logout, resetPasswordForEmail, updatePassword, getCurrentUser, hasPermission, canAccessModule,
     addUser, updateUser, deleteUser, updateUserPermissions, setUserStatus,
     addVehicle, updateVehicle, deleteVehicle,
     addDriver, updateDriver, deleteDriver,

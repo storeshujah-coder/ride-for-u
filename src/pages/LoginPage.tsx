@@ -1,17 +1,25 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Truck, Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { Truck, Mail, Lock, Eye, EyeOff, KeyRound, ArrowLeft } from 'lucide-react';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store/StoreContext';
+import { Modal } from '@/components/Modal';
+import { Button, Input } from '@/components/ui';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Forgot password modal state
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+
   const navigate = useNavigate();
   const toast = useToast();
-  const { login } = useStore();
+  const { login, resetPasswordForEmail } = useStore();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -33,6 +41,25 @@ export function LoginPage() {
       toast(err?.message || 'Login failed. Please check your Supabase connection.', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      toast('Please enter your email address', 'error');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await resetPasswordForEmail(resetEmail.trim());
+      toast('Password reset link has been sent to your email address.', 'success');
+      setForgotOpen(false);
+      setResetEmail('');
+    } catch (err: any) {
+      toast(err?.message || 'Failed to send password reset email.', 'error');
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -64,7 +91,19 @@ export function LoginPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-slate-700">Password</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetEmail(email.trim());
+                    setForgotOpen(true);
+                  }}
+                  className="text-xs text-sky-600 hover:text-sky-700 hover:underline font-medium"
+                >
+                  Forgot Password?
+                </button>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400" />
                 <input
@@ -87,19 +126,54 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 transition disabled:opacity-60"
+              className="w-full py-2.5 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 transition disabled:opacity-60 shadow-sm"
             >
               {loading ? 'Signing in...' : 'Login'}
             </button>
           </form>
-          <div className="mt-4 pt-4 border-t border-slate-100">
-            <p className="text-[11px] text-slate-400 mb-1">Super Admin default credentials:</p>
-            <p className="text-[11px] font-mono text-slate-500 bg-slate-50 rounded px-2 py-1.5">
-              admin@rideforu.com · admin123
-            </p>
-          </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      <Modal
+        open={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        title="Forgot Password"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setForgotOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleResetPassword as any} disabled={resetLoading}>
+              {resetLoading ? 'Sending...' : 'Send Reset Link'}
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleResetPassword} className="space-y-3">
+          <div className="flex items-center gap-3 p-3 bg-sky-50 border border-sky-100 rounded-lg text-sky-800 text-xs mb-3">
+            <KeyRound className="w-5 h-5 shrink-0 text-sky-600" />
+            <span>Enter your registered account email. We'll send you a password reset link to create a new password.</span>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Email Address</label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400" />
+              <input
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="admin@rideforu.com"
+                required
+                className="w-full pl-10 pr-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
+
