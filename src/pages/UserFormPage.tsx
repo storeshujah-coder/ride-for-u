@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { Save, Check, ShieldCheck, Shield, LayoutDashboard, Car, User, Users, FileText, Wallet, BarChart3, Settings, Crown } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
@@ -46,15 +46,35 @@ export function UserFormPage() {
   const navigate = useNavigate();
 
   const existing = id ? users.find((u) => u.id === id) : undefined;
+  const isSuperAdmin = existing?.role === 'super_admin';
 
   const [fullName, setFullName] = useState(existing?.fullName || '');
   const [email, setEmail] = useState(existing?.email || '');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>(existing?.role || 'staff');
   const [status, setStatus] = useState<EntityStatus>(existing?.status || 'Active');
+  const [canManageOthers, setCanManageOthers] = useState<boolean>(Boolean(existing?.canManageOthers));
   const [permissions, setPermissions] = useState<PermissionSet>(
     existing ? clonePerms(existing.permissions) : emptyPermissions()
   );
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      toast('Super Admin is protected and cannot be edited.', 'error');
+      navigate('/users');
+    }
+  }, [isSuperAdmin, navigate, toast]);
+
+  if (isSuperAdmin) {
+    return (
+      <div>
+        <PageHeader title="Protected Account" backTo="/users" />
+        <Card className="p-8 text-center text-slate-600">
+          Super Admin account is protected and cannot be modified from the user management panel.
+        </Card>
+      </div>
+    );
+  }
 
   const toggleAction = (module: ModuleKey, action: PermissionAction, val: boolean) => {
     setPermissions((prev) => {
@@ -87,6 +107,8 @@ export function UserFormPage() {
     );
   };
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!fullName.trim() || !email.trim()) {
@@ -103,31 +125,41 @@ export function UserFormPage() {
     }
     const finalPerms = role === 'super_admin' ? superAdminPermissions() : permissions;
 
-    if (!isEdit) {
-      const u = await addUser({
-        fullName: fullName.trim(),
-        email: email.trim().toLowerCase(),
-        password: password,
-        role,
-        status,
-        permissions: finalPerms,
-      });
-      toast('User added successfully', 'success');
-      navigate(`/users/${u.id}?edit=1`);
-      return;
-    }
+    setSubmitting(true);
+    try {
+      if (!isEdit) {
+        const u = await addUser({
+          fullName: fullName.trim(),
+          email: email.trim(),
+          password: password,
+          role,
+          status,
+          permissions: finalPerms,
+          canManageOthers: role === 'staff' ? canManageOthers : false,
+        });
+        toast('User created successfully!', 'success');
+        navigate('/users');
+        return;
+      }
 
-    if (existing && id) {
-      await updateUser(id, {
-        fullName: fullName.trim(),
-        email: email.trim().toLowerCase(),
-        role,
-        status,
-        ...(password.trim() ? { password } : {}),
-      });
-      await updateUserPermissions(id, finalPerms);
-      toast('User updated successfully', 'success');
-      navigate('/users');
+      if (existing && id) {
+        await updateUser(id, {
+          fullName: fullName.trim(),
+          email: email.trim(),
+          role,
+          status,
+          canManageOthers: role === 'staff' ? canManageOthers : false,
+          ...(password.trim() ? { password } : {}),
+        });
+        await updateUserPermissions(id, finalPerms);
+        toast('User updated successfully!', 'success');
+        navigate('/users');
+      }
+    } catch (err: any) {
+      console.error('User save error:', err);
+      toast(err?.message || 'Failed to save user', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -180,6 +212,30 @@ export function UserFormPage() {
               )}
             </div>
           </div>
+
+          {role === 'staff' && (
+            <div className="mt-5 p-4 rounded-xl border border-sky-100 bg-sky-50/60 flex items-start gap-3">
+              <div className="pt-0.5">
+                <input
+                  id="canManageOthers"
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  checked={canManageOthers}
+                  onChange={(e) => setCanManageOthers(e.target.checked)}
+                />
+              </div>
+              <label htmlFor="canManageOthers" className="cursor-pointer select-none">
+                <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                  Can manage other staff records
+                </span>
+                <span className="text-xs text-slate-500 block mt-0.5">
+                  {canManageOthers
+                    ? 'ON — This user can edit and delete bills/records created by any staff member.'
+                    : 'OFF — This user can only edit and delete bills/records they created themselves.'}
+                </span>
+              </label>
+            </div>
+          )}
         </Card>
 
         {role === 'staff' && (
@@ -350,11 +406,11 @@ export function UserFormPage() {
 
         <div className="flex items-center justify-end gap-3">
           <Link to="/users">
-            <Button variant="secondary">Cancel</Button>
+            <Button variant="secondary" disabled={submitting}>Cancel</Button>
           </Link>
-          <Button type="submit">
+          <Button type="submit" disabled={submitting}>
             <Save className="w-4 h-4" />
-            {isEdit ? 'Save Changes' : 'Create User'}
+            {submitting ? 'Saving...' : (isEdit ? 'Save Changes' : 'Create User')}
           </Button>
         </div>
       </form>

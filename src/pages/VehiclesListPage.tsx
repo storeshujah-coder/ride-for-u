@@ -1,41 +1,56 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Eye, Pencil, Trash2, Car } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, Search, Eye, Pencil, Trash2, Truck } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
 import { useConfirm } from '@/components/Confirm';
 import { useToast } from '@/components/Toast';
 import { PageHeader, Card, Button, StatusBadge, EmptyState } from '@/components/ui';
 
 export function VehiclesListPage() {
-  const { vehicles, drivers, subcontractors, deleteVehicle } = useStore();
+  const { vehicles, deleteVehicle, drivers, subcontractors, canEditRecord, canDeleteRecord } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
-  const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
 
-  const filtered = vehicles.filter((v) =>
-    v.number.toLowerCase().includes(search.toLowerCase()) ||
-    v.model.toLowerCase().includes(search.toLowerCase())
-  );
+  const types = Array.from(new Set(vehicles.map((v) => v.type)));
+  const owners = ['Ride for U', 'Subcontractor'];
+  const statuses = ['Active', 'Maintenance', 'Inactive'];
+
+  const filtered = vehicles.filter((v) => {
+    if (typeFilter && v.type !== typeFilter) return false;
+    if (statusFilter && v.status !== statusFilter) return false;
+    if (ownerFilter && (ownerFilter === 'Ride for U' ? v.ownerType !== 'Ride for U' : v.ownerType !== 'Subcontractor')) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      const match = v.number.toLowerCase().includes(s) || v.model.toLowerCase().includes(s);
+      return match;
+    }
+    return true;
+  });
+
+  const handleDelete = (id: string, num: string) => {
+    confirm({
+      title: 'Delete Vehicle',
+      message: `Are you sure you want to delete vehicle ${num}? All monthly records will also be deleted.`,
+      onConfirm: () => {
+        deleteVehicle(id);
+        toast(`Vehicle ${num} deleted`, 'success');
+      },
+    });
+  };
 
   const ownerName = (v: typeof vehicles[0]) => {
     if (v.ownerType === 'Ride for U') return 'Ride for U';
-    return subcontractors.find((s) => s.id === v.ownerId)?.name || '—';
+    const sub = subcontractors.find((s) => s.id === v.ownerId);
+    return sub?.name || 'Subcontractor';
   };
 
   const driverName = (v: typeof vehicles[0]) => {
-    return drivers.find((d) => d.id === v.driverId)?.fullName || '—';
-  };
-
-  const handleDelete = (id: string, number: string) => {
-    confirm({
-      title: 'Delete Vehicle',
-      message: `Are you sure you want to delete vehicle ${number}? This will also remove its monthly records.`,
-      onConfirm: () => {
-        deleteVehicle(id);
-        toast(`Vehicle ${number} deleted`, 'success');
-      },
-    });
+    const d = drivers.find((x) => x.id === v.driverId);
+    return d?.fullName || '—';
   };
 
   return (
@@ -43,30 +58,52 @@ export function VehiclesListPage() {
       <PageHeader
         title="Vehicles"
         subtitle={`${vehicles.length} vehicle${vehicles.length !== 1 ? 's' : ''} total`}
-        action={
-          <Link to="/vehicles/add">
-            <Button><Plus className="w-4 h-4" /> Add Vehicle</Button>
-          </Link>
-        }
+        action={<Link to="/vehicles/add"><Button><Plus className="w-4 h-4" /> Add Vehicle</Button></Link>}
       />
 
       <Card className="overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100">
-          <div className="relative max-w-xs">
+        <div className="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by number or model..."
+              placeholder="Search vehicles..."
               className="w-full pl-10 pr-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
             />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+            >
+              <option value="">All Types</option>
+              {types.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+              className="px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+            >
+              <option value="">All Owners</option>
+              {owners.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+            >
+              <option value="">All Statuses</option>
+              {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
           </div>
         </div>
 
         {filtered.length === 0 ? (
           <EmptyState
-            icon={<Car className="w-10 h-10" />}
+            icon={<Truck className="w-10 h-10" />}
             title="No vehicles found"
             message={search ? "Try a different search." : "Add your first vehicle to get started."}
             action={!search && <Link to="/vehicles/add"><Button><Plus className="w-4 h-4" /> Add Vehicle</Button></Link>}
@@ -103,16 +140,20 @@ export function VehiclesListPage() {
                         <Link to={`/vehicles/${v.id}`} className="p-1.5 rounded-lg text-slate-400 hover:bg-sky-50 hover:text-sky-600 transition" title="View">
                           <Eye className="w-4 h-4" />
                         </Link>
-                        <Link to={`/vehicles/${v.id}?edit=1`} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition" title="Edit">
-                          <Pencil className="w-4 h-4" />
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(v.id, v.number)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canEditRecord(v) && (
+                          <Link to={`/vehicles/${v.id}?edit=1`} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition" title="Edit">
+                            <Pencil className="w-4 h-4" />
+                          </Link>
+                        )}
+                        {canDeleteRecord(v) && (
+                          <button
+                            onClick={() => handleDelete(v.id, v.number)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

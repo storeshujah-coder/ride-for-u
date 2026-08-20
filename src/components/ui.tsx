@@ -5,23 +5,36 @@ interface PageHeaderProps {
   title: string;
   subtitle?: string;
   backTo?: string;
+  onBack?: () => void;
   action?: ReactNode;
 }
 
-export function PageHeader({ title, subtitle, backTo, action }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, backTo, onBack, action }: PageHeaderProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
       <div className="flex items-center gap-3">
-        {backTo && (
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex-shrink-0 cursor-pointer"
+            title="Go Back"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+        ) : backTo ? (
           <Link
             to={backTo}
             className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex-shrink-0"
+            title="Go Back"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
-        )}
+        ) : null}
         <div>
           <h1 className="text-xl font-bold text-slate-800">{title}</h1>
           {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}

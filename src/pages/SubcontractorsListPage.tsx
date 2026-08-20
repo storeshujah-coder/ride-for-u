@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, Eye, Pencil, Trash2, Users } from 'lucide-react';
+import { Plus, Search, Eye, Pencil, Trash2, Building2 } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
 import { useConfirm } from '@/components/Confirm';
 import { useToast } from '@/components/Toast';
 import { PageHeader, Card, Button, StatusBadge, EmptyState } from '@/components/ui';
 
 export function SubcontractorsListPage() {
-  const { subcontractors, vehicles, deleteSubcontractor } = useStore();
+  const { subcontractors, vehicles, deleteSubcontractor, canEditRecord, canDeleteRecord } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
   const [search, setSearch] = useState('');
@@ -23,8 +23,11 @@ export function SubcontractorsListPage() {
   const handleDelete = (id: string, name: string) => {
     confirm({
       title: 'Delete Subcontractor',
-      message: `Delete ${name}? Their vehicles will revert to Ride for U ownership.`,
-      onConfirm: () => { deleteSubcontractor(id); toast(`Subcontractor ${name} deleted`, 'success'); },
+      message: `Are you sure you want to delete subcontractor ${name}? Associated vehicles will have their owner reset.`,
+      onConfirm: () => {
+        deleteSubcontractor(id);
+        toast(`Subcontractor ${name} deleted`, 'success');
+      },
     });
   };
 
@@ -52,7 +55,7 @@ export function SubcontractorsListPage() {
 
         {filtered.length === 0 ? (
           <EmptyState
-            icon={<Users className="w-10 h-10" />}
+            icon={<Building2 className="w-10 h-10" />}
             title="No subcontractors found"
             message={search ? "Try a different search." : "Add your first subcontractor to get started."}
             action={!search && <Link to="/subcontractors/add"><Button><Plus className="w-4 h-4" /> Add Subcontractor</Button></Link>}
@@ -80,9 +83,13 @@ export function SubcontractorsListPage() {
                     <td className="px-5 py-3"><StatusBadge status={s.status} /></td>
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <Link to={`/subcontractors/${s.id}`} className="p-1.5 rounded-lg text-slate-400 hover:bg-sky-50 hover:text-sky-600 transition"><Eye className="w-4 h-4" /></Link>
-                        <Link to={`/subcontractors/${s.id}?edit=1`} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition"><Pencil className="w-4 h-4" /></Link>
-                        <button onClick={() => handleDelete(s.id, s.name)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+                        <Link to={`/subcontractors/${s.id}`} className="p-1.5 rounded-lg text-slate-400 hover:bg-sky-50 hover:text-sky-600 transition" title="View"><Eye className="w-4 h-4" /></Link>
+                        {canEditRecord(s) && (
+                          <Link to={`/subcontractors/${s.id}?edit=1`} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition" title="Edit"><Pencil className="w-4 h-4" /></Link>
+                        )}
+                        {canDeleteRecord(s) && (
+                          <button onClick={() => handleDelete(s.id, s.name)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        )}
                       </div>
                     </td>
                   </tr>

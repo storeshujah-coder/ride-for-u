@@ -12,7 +12,7 @@ export function SubcontractorDetailPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const isEdit = searchParams.get('edit') === '1';
-  const { subcontractors, vehicles, monthlyRecords, deleteSubcontractor } = useStore();
+  const { subcontractors, vehicles, monthlyRecords, deleteSubcontractor, canEditRecord, canDeleteRecord } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
   const navigate = useNavigate();
@@ -58,8 +58,12 @@ export function SubcontractorDetailPage() {
         backTo="/subcontractors"
         action={
           <div className="flex gap-2">
-            <Link to={`/subcontractors/${sub.id}?edit=1`}><Button variant="secondary"><Pencil className="w-4 h-4" /> Edit</Button></Link>
-            <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> Delete</Button>
+            {canEditRecord(sub) && (
+              <Link to={`/subcontractors/${sub.id}?edit=1`}><Button variant="secondary"><Pencil className="w-4 h-4" /> Edit</Button></Link>
+            )}
+            {canDeleteRecord(sub) && (
+              <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> Delete</Button>
+            )}
           </div>
         }
       />

@@ -13,7 +13,7 @@ export function VehicleDetailPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const isEdit = searchParams.get('edit') === '1';
-  const { vehicles, drivers, subcontractors, monthlyRecords, deleteVehicle } = useStore();
+  const { vehicles, drivers, subcontractors, monthlyRecords, deleteVehicle, canEditRecord, canDeleteRecord } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
   const navigate = useNavigate();
@@ -69,10 +69,14 @@ export function VehicleDetailPage() {
         backTo="/vehicles"
         action={
           <div className="flex gap-2">
-            <Link to={`/vehicles/${vehicle.id}?edit=1`}>
-              <Button variant="secondary"><Pencil className="w-4 h-4" /> Edit</Button>
-            </Link>
-            <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> Delete</Button>
+            {canEditRecord(vehicle) && (
+              <Link to={`/vehicles/${vehicle.id}?edit=1`}>
+                <Button variant="secondary"><Pencil className="w-4 h-4" /> Edit</Button>
+              </Link>
+            )}
+            {canDeleteRecord(vehicle) && (
+              <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> Delete</Button>
+            )}
           </div>
         }
       />

@@ -15,7 +15,7 @@ export function DriverDetailPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const isEdit = searchParams.get('edit') === '1';
-  const { drivers, vehicles, salaries, deleteDriver, addSalary, updateSalary, deleteSalary } = useStore();
+  const { drivers, vehicles, salaries, deleteDriver, addSalary, updateSalary, deleteSalary, canEditRecord, canDeleteRecord } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
   const navigate = useNavigate();
@@ -121,8 +121,12 @@ export function DriverDetailPage() {
         backTo="/drivers"
         action={
           <div className="flex gap-2">
-            <Link to={`/drivers/${driver.id}?edit=1`}><Button variant="secondary"><Pencil className="w-4 h-4" /> Edit</Button></Link>
-            <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> Delete</Button>
+            {canEditRecord(driver) && (
+              <Link to={`/drivers/${driver.id}?edit=1`}><Button variant="secondary"><Pencil className="w-4 h-4" /> Edit</Button></Link>
+            )}
+            {canDeleteRecord(driver) && (
+              <Button variant="danger" onClick={handleDelete}><Trash2 className="w-4 h-4" /> Delete</Button>
+            )}
           </div>
         }
       />
@@ -168,8 +172,12 @@ export function DriverDetailPage() {
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium text-slate-700">{formatMonth(s.month)}</span>
                         <div className="flex gap-1">
-                          <button onClick={() => openEditSalary(s)} className="p-1 rounded text-slate-400 hover:bg-amber-50 hover:text-amber-600"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => handleSalaryDelete(s)} className="p-1 rounded text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEditRecord(s) && (
+                            <button onClick={() => openEditSalary(s)} className="p-1 rounded text-slate-400 hover:bg-amber-50 hover:text-amber-600" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                          )}
+                          {canDeleteRecord(s) && (
+                            <button onClick={() => handleSalaryDelete(s)} className="p-1 rounded text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                          )}
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">

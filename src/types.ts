@@ -30,10 +30,11 @@ export interface User {
   id: string;
   fullName: string;
   email: string;
-  password: string;
+  password?: string;
   role: UserRole;
   status: EntityStatus;
   permissions: PermissionSet;
+  canManageOthers?: boolean; // "Can manage other staff records"
   createdAt: string;
 }
 
@@ -85,6 +86,7 @@ export interface Vehicle {
   model: string;
   status: EntityStatus;
   notes: string;
+  createdBy?: string;
   createdAt: string;
 }
 
@@ -100,6 +102,7 @@ export interface Driver {
   vehicleId?: string;
   status: EntityStatus;
   notes: string;
+  createdBy?: string;
   createdAt: string;
 }
 
@@ -111,6 +114,7 @@ export interface SalaryRecord {
   paidAmount: number;
   salaryDate: string;
   remarks: string;
+  createdBy?: string;
   createdAt: string;
 }
 
@@ -123,22 +127,26 @@ export interface Subcontractor {
   joiningDate: string;
   status: EntityStatus;
   notes: string;
+  createdBy?: string;
   createdAt: string;
 }
 
 export interface RouteEntry {
   id: string;
   location: string;
+  km?: number;
   amount: number;
 }
 
 export interface DailyRecord {
   id: string;
   date: string; // YYYY-MM-DD
+  km?: number;
   amount: number;
   details: string;
   routes: RouteEntry[];
   entryType: 'quick' | 'detailed';
+  createdBy?: string;
 }
 
 export interface Expense {
@@ -148,22 +156,25 @@ export interface Expense {
   categoryId: string;
   amount: number;
   remarks: string;
+  createdBy?: string;
   createdAt: string;
 }
 
-export type ExpenseFor = 'Vehicle' | 'Driver' | 'Subcontractor' | 'Office' | 'Other';
+export type ExpenseForType = 'Vehicle' | 'Driver' | 'Subcontractor' | 'Office' | 'Other';
+export type ExpenseFor = ExpenseForType;
 export type PaymentMethod = 'Cash' | 'Bank Transfer' | 'Cheque' | 'Other';
 
 export interface BusinessExpense {
   id: string;
   date: string;
   categoryId: string;
-  expenseFor: ExpenseFor;
+  expenseFor: ExpenseForType;
   relatedToId: string;
   relatedToName: string;
   amount: number;
   paymentMethod: PaymentMethod;
   remarks: string;
+  createdBy?: string;
   createdAt: string;
 }
 
@@ -172,12 +183,33 @@ export interface ExpenseCategory {
   name: string;
 }
 
+export interface Department {
+  id: string;
+  name: string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+export interface DepartmentEntry {
+  id: string;
+  monthlyRecordId?: string;
+  departmentId: string;
+  departmentName?: string;
+  payment: number;
+  remarks?: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
 export interface MonthlyRecord {
   id: string;
   vehicleId: string;
   month: string; // YYYY-MM
   dailyRecords: DailyRecord[];
   expenses: Expense[];
+  departments?: DepartmentEntry[];
+  createdBy?: string;
   createdAt: string;
 }
 
@@ -193,10 +225,19 @@ export interface ActivityLog {
   newValue?: string;
 }
 
+export interface KmSlab {
+  id: string;
+  minKm: number;
+  maxKm: number;
+  rate: number;
+  description?: string;
+}
+
 export interface Settings {
   companyName: string;
   currency: string;
   commissionRate: number; // percentage e.g. 2.5
   adminName: string;
   appearance: 'light' | 'dark';
+  kmRates?: KmSlab[];
 }

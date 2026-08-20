@@ -7,7 +7,7 @@ import { useToast } from '@/components/Toast';
 import { PageHeader, Card, Button, StatusBadge, EmptyState } from '@/components/ui';
 
 export function DriversListPage() {
-  const { drivers, vehicles, deleteDriver } = useStore();
+  const { drivers, vehicles, deleteDriver, canEditRecord, canDeleteRecord } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
   const [search, setSearch] = useState('');
@@ -86,9 +86,13 @@ export function DriversListPage() {
                     <td className="px-5 py-3"><StatusBadge status={d.status} /></td>
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <Link to={`/drivers/${d.id}`} className="p-1.5 rounded-lg text-slate-400 hover:bg-sky-50 hover:text-sky-600 transition"><Eye className="w-4 h-4" /></Link>
-                        <Link to={`/drivers/${d.id}?edit=1`} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition"><Pencil className="w-4 h-4" /></Link>
-                        <button onClick={() => handleDelete(d.id, d.fullName)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+                        <Link to={`/drivers/${d.id}`} className="p-1.5 rounded-lg text-slate-400 hover:bg-sky-50 hover:text-sky-600 transition" title="View"><Eye className="w-4 h-4" /></Link>
+                        {canEditRecord(d) && (
+                          <Link to={`/drivers/${d.id}?edit=1`} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition" title="Edit"><Pencil className="w-4 h-4" /></Link>
+                        )}
+                        {canDeleteRecord(d) && (
+                          <button onClick={() => handleDelete(d.id, d.fullName)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        )}
                       </div>
                     </td>
                   </tr>

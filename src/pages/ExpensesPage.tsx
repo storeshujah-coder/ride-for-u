@@ -16,6 +16,7 @@ export function ExpensesPage() {
     vehicles, drivers, subcontractors, categories, businessExpenses,
     addBusinessExpense, updateBusinessExpense, deleteBusinessExpense,
     addCategory, updateCategory, deleteCategory,
+    canEditRecord, canDeleteRecord,
   } = useStore();
   const confirm = useConfirm();
   const toast = useToast();
@@ -204,7 +205,7 @@ export function ExpensesPage() {
         <PageHeader
           title={`${selectedCatName} Expenses`}
           subtitle={`${formatMonth(categoryMonth)} — ${categoryDetailExpenses.length} expense${categoryDetailExpenses.length !== 1 ? 's' : ''}`}
-          backTo="/expenses"
+          onBack={() => setSelectedCategory(null)}
           action={
             <div className="flex items-center gap-2">
               <input
@@ -265,8 +266,12 @@ export function ExpensesPage() {
                       <td className="px-5 py-3 text-right font-medium text-slate-700">{formatPKR(exp.amount)}</td>
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => openEditExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition"><Pencil className="w-4 h-4" /></button>
-                          <button onClick={() => handleDeleteExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+                          {canEditRecord(exp) && (
+                            <button onClick={() => openEditExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition" title="Edit Expense"><Pencil className="w-4 h-4" /></button>
+                          )}
+                          {canDeleteRecord(exp) && (
+                            <button onClick={() => handleDeleteExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition" title="Delete Expense"><Trash2 className="w-4 h-4" /></button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -418,8 +423,12 @@ export function ExpensesPage() {
                       <td className="px-5 py-3 text-slate-600 max-w-[150px] truncate">{exp.remarks || '—'}</td>
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => openEditExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition"><Pencil className="w-4 h-4" /></button>
-                          <button onClick={() => handleDeleteExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+                          {canEditRecord(exp) && (
+                            <button onClick={() => openEditExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-amber-50 hover:text-amber-600 transition" title="Edit Expense"><Pencil className="w-4 h-4" /></button>
+                          )}
+                          {canDeleteRecord(exp) && (
+                            <button onClick={() => handleDeleteExpense(exp)} className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition" title="Delete Expense"><Trash2 className="w-4 h-4" /></button>
+                          )}
                         </div>
                       </td>
                     </tr>

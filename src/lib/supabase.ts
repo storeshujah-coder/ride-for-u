@@ -16,4 +16,14 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+// Dedicated client for user creation/admin actions so it doesn't overwrite the active session in storage
+export const supabaseAdminAuth = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
+
 export type SupabaseClient = typeof supabase;
+

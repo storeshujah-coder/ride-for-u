@@ -12,10 +12,49 @@ const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 interface DayEntry {
   date: string;
   dayName: string;
+  km: string;
   amount: string;
   details: string;
   routes: RouteEntry[];
   entryType: 'quick' | 'detailed';
+}
+
+function buildDayEntries(monthStr: string, existingRecord?: MonthlyRecord): DayEntry[] {
+  const count = daysInMonth(monthStr);
+  const existingMap = new Map<string, DailyRecord>();
+  if (existingRecord) {
+    existingRecord.dailyRecords.forEach((d) => existingMap.set(d.date, d));
+  }
+  const entries: DayEntry[] = [];
+  for (let d = 1; d <= count; d++) {
+    const dayNum = String(d).padStart(2, '0');
+    const dateStr = `${monthStr}-${dayNum}`;
+    const dateObj = new Date(Number(monthStr.slice(0, 4)), Number(monthStr.slice(5, 7)) - 1, d);
+    const dayName = dayNames[dateObj.getDay()];
+    const rec = existingMap.get(dateStr);
+    if (rec) {
+      entries.push({
+        date: dateStr,
+        dayName,
+        km: rec.km ? String(rec.km) : '',
+        amount: rec.amount ? String(rec.amount) : '',
+        details: rec.details || '',
+        routes: rec.routes || [],
+        entryType: rec.entryType || 'quick',
+      });
+    } else {
+      entries.push({
+        date: dateStr,
+        dayName,
+        km: '',
+        amount: '',
+        details: '',
+        routes: [],
+        entryType: 'quick',
+      });
+    }
+  }
+  return entries;
 }
 
 function SearchableVehicleSelect({
@@ -133,7 +172,7 @@ function SearchableVehicleSelect({
 }
 
 export function MonthlyRecordAddPage() {
-  const { vehicles, monthlyRecords, saveMonthlyRecordBulk } = useStore();
+  const { vehicles, monthlyRecords, saveMonthlyRecordBulk, getRateForKm } = useStore();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -145,42 +184,19 @@ export function MonthlyRecordAddPage() {
 
   const monthOptions = useMemo(() => {
     const opts = generateMonthOptions(24);
-    // Also include future months up to end of current year
     const d = new Date();
     for (let m = d.getMonth() + 1; m <= 11; m++) {
-      const ym = `${d.getFullYear()}-${String(m + 1).padStart(2, '0')}`;
-      if (!opts.includes(ym)) opts.push(ym);
+      opts.unshift(`${d.getFullYear()}-${String(m + 1).padStart(2, '0')}`);
     }
-    return opts;
+    return [...new Set(opts)];
   }, []);
 
-  const buildDayEntries = (ym: string, existing?: MonthlyRecord): DayEntry[] => {
-    const [y, m] = ym.split('-').map(Number);
-    const days = daysInMonth(ym);
-    const entries: DayEntry[] = [];
-    for (let d = 1; d <= days; d++) {
-      const dateStr = `${ym}-${String(d).padStart(2, '0')}`;
-      const dayName = dayNames[new Date(y, m - 1, d).getDay()];
-      const existingDr = existing?.dailyRecords.find((dr) => dr.date === dateStr);
-      if (existingDr) {
-        entries.push({
-          date: dateStr,
-          dayName,
-          amount: String(existingDr.amount),
-          details: existingDr.details,
-          routes: existingDr.routes.map((r) => ({ ...r })),
-          entryType: existingDr.entryType,
-        });
-      } else {
-        entries.push({ date: dateStr, dayName, amount: '', details: '', routes: [], entryType: 'quick' });
-      }
+  const handleGenerate = (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    if (!vehicleId) {
+      toast('Please select a vehicle', 'error');
+      return;
     }
-    return entries;
-  };
-
-  const handleGenerate = (e: FormEvent) => {
-    e.preventDefault();
-    if (!vehicleId) { toast('Please select a vehicle', 'error'); return; }
     const existing = monthlyRecords.find((r) => r.vehicleId === vehicleId && r.month === month);
     setDayEntries(buildDayEntries(month, existing));
     setShowTable(true);
@@ -190,13 +206,44 @@ export function MonthlyRecordAddPage() {
     setDayEntries((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   };
 
-  const switchEntryType = (index: number, type: 'quick' | 'detailed') => {
-    if (type === 'detailed') {
+  const handleKmChange = (index: number, kmVal: string) => {
+    const numKm = Number(kmVal);
+    const updates: Partial<DayEntry> = { km: kmVal };
+    if (!isNaN(numKm) && numKm > 0) {
+      const autoRate = getRateForKm(numKm);
+      if (autoRate != null) {
+        updates.amount = String(autoRate);
+      }
+    }
+    updateDay(index, updates);
+  };
+
+  const handleRouteKmChange = (dayIndex: number, routeId: string, kmVal: string) => {
+    const numKm = Number(kmVal);
+    const autoRate = !isNaN(numKm) && numKm > 0 ? getRateForKm(numKm) : null;
+    setDayEntries((prev) => prev.map((d, i) => {
+      if (i !== dayIndex) return d;
+      return {
+        ...d,
+        routes: d.routes.map((r) => {
+          if (r.id !== routeId) return r;
+          return {
+            ...r,
+            km: !isNaN(numKm) && numKm > 0 ? numKm : undefined,
+            amount: autoRate != null ? autoRate : r.amount,
+          };
+        }),
+      };
+    }));
+  };
+
+  const switchEntryType = (index: number, newType: 'quick' | 'detailed') => {
+    if (newType === 'detailed') {
       const current = dayEntries[index];
-      const routes: RouteEntry[] = current.routes.length > 0
+      const initialRoutes: RouteEntry[] = current.routes.length > 0
         ? current.routes
-        : [{ id: `rt-${Date.now()}-0`, location: '', amount: 0 }];
-      updateDay(index, { entryType: 'detailed', routes });
+        : [{ id: `rt-${Date.now()}-0`, location: current.details || '', amount: Number(current.amount) || 0 }];
+      updateDay(index, { entryType: 'detailed', routes: initialRoutes, details: '' });
     } else {
       const current = dayEntries[index];
       const total = current.routes.reduce((s, r) => s + (Number(r.amount) || 0), 0);
@@ -241,12 +288,13 @@ export function MonthlyRecordAddPage() {
     if (!vehicleId) { toast('Please select a vehicle', 'error'); return; }
     setSaving(true);
     const dailyData: Omit<DailyRecord, 'id'>[] = dayEntries.map((d) => {
+      const numKm = Number(d.km) || undefined;
       if (d.entryType === 'detailed') {
         const validRoutes = d.routes.filter((r) => r.amount > 0 || r.location.trim() !== '');
         const total = validRoutes.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-        return { date: d.date, amount: total, details: '', routes: validRoutes, entryType: 'detailed' as const };
+        return { date: d.date, km: numKm, amount: total, details: '', routes: validRoutes, entryType: 'detailed' as const };
       }
-      return { date: d.date, amount: Number(d.amount) || 0, details: d.details, routes: [], entryType: 'quick' as const };
+      return { date: d.date, km: numKm, amount: Number(d.amount) || 0, details: d.details, routes: [], entryType: 'quick' as const };
     });
     const rec = await saveMonthlyRecordBulk(vehicleId, month, dailyData);
     setSaving(false);
@@ -334,9 +382,10 @@ export function MonthlyRecordAddPage() {
                       <tr className="bg-slate-50 text-left text-xs text-slate-500 font-medium uppercase tracking-wide border-b border-slate-200">
                         <th className="px-3 py-3 w-16">Date</th>
                         <th className="px-3 py-3 w-12">Day</th>
-                        <th className="px-3 py-3 w-28">Type</th>
-                        <th className="px-3 py-3 min-w-[200px]">Amount / Routes</th>
-                        <th className="px-3 py-3 min-w-[180px]">Details</th>
+                        <th className="px-3 py-3 w-24">Type</th>
+                        <th className="px-3 py-3 w-28">KM (Auto Rate)</th>
+                        <th className="px-3 py-3 min-w-[180px]">Amount / Routes (PKR)</th>
+                        <th className="px-3 py-3 min-w-[180px]">Details / Remarks</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -364,15 +413,27 @@ export function MonthlyRecordAddPage() {
                               {day.entryType === 'quick' ? (
                                 <input
                                   type="number"
+                                  value={day.km}
+                                  onChange={(e) => handleKmChange(index, e.target.value)}
+                                  placeholder="e.g. 75"
+                                  className="w-full px-2.5 py-1.5 rounded-md border border-sky-200 bg-sky-50/40 text-sm font-semibold text-sky-800 placeholder-slate-300 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                                />
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              {day.entryType === 'quick' ? (
+                                <input
+                                  type="number"
                                   value={day.amount}
                                   onChange={(e) => updateDay(index, { amount: e.target.value })}
                                   placeholder="0"
-                                  className="w-full px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-300 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                                  className="w-full px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-300 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-medium"
                                 />
                               ) : (
                                 <div className="space-y-1.5">
                                   {day.routes.map((route) => {
-                                    const routeTotal = day.routes.reduce((s, r) => s + (Number(r.amount) || 0), 0);
                                     return (
                                       <div key={route.id} className="flex gap-1.5 items-center">
                                         <input
@@ -384,10 +445,18 @@ export function MonthlyRecordAddPage() {
                                         />
                                         <input
                                           type="number"
+                                          value={route.km || ''}
+                                          onChange={(e) => handleRouteKmChange(index, route.id, e.target.value)}
+                                          placeholder="KM"
+                                          className="w-16 px-2 py-1.5 rounded-md border border-sky-200 bg-sky-50/40 text-xs font-semibold text-sky-800 placeholder-slate-300 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                                          title="Enter KM for auto rate"
+                                        />
+                                        <input
+                                          type="number"
                                           value={route.amount || ''}
                                           onChange={(e) => updateRoute(index, route.id, { amount: Number(e.target.value) || 0 })}
-                                          placeholder="0"
-                                          className="w-20 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-xs text-slate-800 placeholder-slate-300 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                                          placeholder="Rate"
+                                          className="w-20 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-xs text-slate-800 placeholder-slate-300 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-medium"
                                         />
                                         <button
                                           onClick={() => removeRoute(index, route.id)}
@@ -431,7 +500,7 @@ export function MonthlyRecordAddPage() {
                     </tbody>
                     <tfoot>
                       <tr className="bg-slate-50 font-bold text-slate-800 border-t-2 border-slate-200">
-                        <td className="px-3 py-3" colSpan={3}>TOTAL DUTY</td>
+                        <td className="px-3 py-3" colSpan={4}>TOTAL DUTY</td>
                         <td className="px-3 py-3 text-sm">{formatPKR(totalDuty)}</td>
                         <td></td>
                       </tr>

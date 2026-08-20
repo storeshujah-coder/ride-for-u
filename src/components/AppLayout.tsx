@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Car, User, Users, FileText, BarChart3, Settings,
@@ -23,6 +23,14 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { settings, currentUser, canAccessModule, logout } = useStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (settings.appearance === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings.appearance]);
 
   const handleLogout = () => {
     logout();
