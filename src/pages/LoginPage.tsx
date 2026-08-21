@@ -319,7 +319,7 @@ export function LoginPage() {
           <form onSubmit={handleSendCode} className="space-y-3.5">
             <div className="p-3 bg-sky-50 border border-sky-100 rounded-lg text-sky-800 text-xs">
               <KeyRound className="w-4 h-4 inline-block mr-1 text-sky-600 align-text-bottom" />
-              Enter your registered account email. A 6-digit verification code will be sent to your email to verify your identity.
+              Enter your registered account email. A password reset link and verification details will be sent to your email.
             </div>
 
             <div>
@@ -339,12 +339,20 @@ export function LoginPage() {
           </form>
         )}
 
-        {/* Step 2: Enter Verification Code */}
+        {/* Step 2: Enter Verification Code or Click Link */}
         {forgotStep === 2 && (
           <form onSubmit={handleVerifyOtp} className="space-y-3.5">
-            <div className="p-3 bg-sky-50 border border-sky-100 rounded-lg text-sky-800 text-xs">
-              <ShieldCheck className="w-4 h-4 inline-block mr-1 text-sky-600 align-text-bottom" />
-              We sent a verification code to <strong>{resetEmail}</strong>. Please enter the 6-digit code below.
+            <div className="p-3 bg-sky-50 border border-sky-100 rounded-lg text-sky-800 text-xs space-y-1.5">
+              <div className="flex items-start gap-1.5 font-medium">
+                <ShieldCheck className="w-4 h-4 text-sky-600 flex-shrink-0 mt-0.5" />
+                <span>Reset email sent to <strong>{resetEmail}</strong>!</span>
+              </div>
+              <p className="text-slate-600 pl-5">
+                👉 <strong>Option 1 (Easiest):</strong> Open your email &amp; click the <strong>"Reset password"</strong> link. It will automatically open the password reset screen!
+              </p>
+              <p className="text-slate-600 pl-5">
+                👉 <strong>Option 2:</strong> If you received a verification code, enter it below:
+              </p>
             </div>
 
             <div>
@@ -353,11 +361,10 @@ export function LoginPage() {
                 type="text"
                 value={otpCode}
                 onChange={(e) => setOtpCode(e.target.value)}
-                placeholder="123456"
-                required
-                maxLength={8}
+                placeholder="Enter code (optional if clicking link)"
+                maxLength={10}
                 autoFocus
-                className="w-full text-center text-lg font-bold tracking-widest py-2.5 rounded-lg border border-sky-300 bg-sky-50/30 text-slate-800 placeholder-slate-300 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                className="w-full text-center text-base font-medium py-2.5 rounded-lg border border-sky-300 bg-sky-50/30 text-slate-800 placeholder-slate-400 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
               />
             </div>
 
