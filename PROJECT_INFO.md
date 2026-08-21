@@ -10,6 +10,7 @@ This file contains all critical project metadata, repository details, backend co
 |---|---|
 | **Repository URL** | [https://github.com/storeshujah-coder/ride-for-u](https://github.com/storeshujah-coder/ride-for-u) |
 | **GitHub Account / Owner** | `storeshujah-coder` |
+| **GitHub Login Email** | `storeshujah@gmail.com` |
 | **Default Branch** | `main` |
 | **Repository Type** | Public / Private Git Repository |
 
@@ -19,6 +20,7 @@ This file contains all critical project metadata, repository details, backend co
 
 | Field | Detail |
 |---|---|
+| **Supabase Account Email** | `nqnichqni@gmail.com` |
 | **Project Reference ID** | `sgldyuhydllvqrroqnnx` |
 | **Supabase Dashboard** | [https://supabase.com/dashboard/project/sgldyuhydllvqrroqnnx](https://supabase.com/dashboard/project/sgldyuhydllvqrroqnnx) |
 | **Supabase URL** | `https://sgldyuhydllvqrroqnnx.supabase.co` |
@@ -43,6 +45,7 @@ This file contains all critical project metadata, repository details, backend co
 
 | Platform | Details |
 |---|---|
+| **Vercel Account Email** | `storeshujah@gmail.com` |
 | **Vercel / Netlify Configuration** | Configured with `vercel.json` (SPA routing rewrite to `/index.html`) |
 | **Build Command** | `npm run build` |
 | **Output Directory** | `dist` |
