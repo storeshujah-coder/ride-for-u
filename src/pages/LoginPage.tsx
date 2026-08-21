@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Mail, Lock, Eye, EyeOff, KeyRound, ArrowLeft, CheckCircle2, ShieldCheck, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/Toast';
@@ -26,6 +26,27 @@ export function LoginPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { login, resetPasswordForEmail, updatePassword } = useStore();
+
+  // Listen for Supabase password recovery callback via email link
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setForgotStep(3);
+        setForgotOpen(true);
+        toast('Please enter your new password.', 'info');
+      }
+    });
+
+    const hash = window.location.hash || '';
+    if (hash.includes('type=recovery') || hash.includes('access_token')) {
+      setForgotStep(3);
+      setForgotOpen(true);
+    }
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, [toast]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
