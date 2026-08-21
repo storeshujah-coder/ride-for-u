@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import type {
   Vehicle, Driver, Subcontractor, MonthlyRecord, ExpenseCategory,
@@ -6,11 +6,26 @@ import type {
   BusinessExpense, ExpenseFor, PaymentMethod,
   User, ModuleKey, PermissionAction, PermissionSet, EntityStatus,
   Department, DepartmentEntry, KmSlab,
+  AppNotification, NotificationActionType, NotificationEntityType,
 } from '@/types';
 import { emptyPermissions, superAdminPermissions, ALL_MODULES } from '@/types';
 import { supabase, supabaseAdminAuth } from '@/lib/supabase';
+import { playNotificationSound } from '@/utils/sound';
 
 const AUTH_STORAGE_KEY = 'rfu-auth-user';
+const NOTIFICATIONS_STORAGE_KEY = 'rfu-notifications-data';
+const LIVE_CHANNEL_NAME = 'rfu_cross_tab_sync_v1';
+
+const liveBroadcastChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel(LIVE_CHANNEL_NAME)
+  : null;
+
+function broadcastLiveEvent(type: string, payload?: any) {
+  try {
+    liveBroadcastChannel?.postMessage({ type, payload });
+  } catch {}
+}
+
 
 export const DEFAULT_KM_SLABS: KmSlab[] = [
   { id: 'km-1', minKm: 0, maxKm: 50, rate: 5000, description: '0 to 50 KM' },
@@ -198,20 +213,32 @@ function toActivityLog(row: any): ActivityLog {
   const ampm = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   const time = `${h.toString().padStart(2, '0')}:${m} ${ampm}`;
-  const oldVal = row.old_data ? JSON.stringify(row.old_data) : undefined;
-  const newVal = row.new_data ? JSON.stringify(row.new_data) : undefined;
+  const oldVal = row.old_data ? (typeof row.old_data === 'string' ? row.old_data : JSON.stringify(row.old_data)) : undefined;
+  const newVal = row.new_data ? (typeof row.new_data === 'string' ? row.new_data : JSON.stringify(row.new_data)) : undefined;
+  
+  let actionText = row.action_description || '';
+  if (!actionText) {
+    const act = (row.action || '').toUpperCase();
+    const ent = (row.entity_type || '').replace(/_/g, ' ');
+    if (act === 'UPDATE') actionText = `Updated ${ent}`;
+    else if (act === 'INSERT' || act === 'CREATE') actionText = `Created ${ent}`;
+    else if (act === 'DELETE') actionText = `Deleted ${ent}`;
+    else actionText = `${row.action || ''} ${ent}`;
+  }
+
   return {
     id: String(row.id),
     actor: row.actor_name || 'System',
     date,
     time,
-    action: row.action_description || `${row.action} ${row.entity_type}`,
+    action: actionText,
     entity: row.entity_type || '',
     entityId: row.entity_id || undefined,
     oldValue: oldVal,
     newValue: newVal,
   };
 }
+
 
 function toDailyRecord(row: any, routesMap: Map<string, RouteEntry[]>): DailyRecord {
   return {
@@ -226,7 +253,31 @@ function toDailyRecord(row: any, routesMap: Map<string, RouteEntry[]>): DailyRec
   };
 }
 
+function toNotification(row: any): AppNotification {
+  return {
+    id: String(row.id),
+    actorId: row.actor_id ? String(row.actor_id) : undefined,
+    actorName: row.actor_name || 'Staff',
+    action: (row.action || 'UPDATE') as NotificationActionType,
+    entityType: (row.entity_type || 'vehicle') as NotificationEntityType,
+    entityId: row.entity_id ? String(row.entity_id) : undefined,
+    entityTitle: row.entity_title || '',
+    message: row.message || '',
+    targetUrl: row.target_url || '/dashboard',
+    isRead: Boolean(row.is_read),
+    createdAt: typeof row.created_at === 'string' ? row.created_at : row.created_at?.toISOString?.() || new Date().toISOString(),
+  };
+}
+
 interface StoreContextValue {
+  notifications: AppNotification[];
+  unreadNotificationsCount: number;
+  createNotification: (n: Omit<AppNotification, 'id' | 'createdAt' | 'isRead' | 'actorName'> & { actorName?: string }) => Promise<void>;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+
+
   vehicles: Vehicle[];
   drivers: Driver[];
   subcontractors: Subcontractor[];
@@ -421,7 +472,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUser]);
 
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    try {
+      const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
+
+  const unreadNotificationsCount = useMemo(() => {
+    if (currentUser?.role !== 'super_admin') return 0;
+    return notifications.filter((n) => !n.isRead).length;
+  }, [notifications, currentUser?.role]);
+
+  // Notifications only visible to Super Admin
+  const visibleNotifications = useMemo(() => {
+    return currentUser?.role === 'super_admin' ? notifications : [];
+  }, [notifications, currentUser?.role]);
+
+  // Sync notifications to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
+    } catch {}
+  }, [notifications]);
+
   const loadAllData = useCallback(async () => {
+
     try {
       const { data: v } = await supabase.from('vehicles').select('*');
       if (v) setVehicles(v.map(toVehicle));
@@ -482,8 +559,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       const { data: act } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(500);
       if (act) setActivity(act.map(toActivityLog));
+
+      // Load notifications
+      try {
+        const { data: notifs } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(200);
+        if (notifs) setNotifications(notifs.map(toNotification));
+      } catch (ne) {
+        console.warn('notifications load note:', ne);
+      }
     } catch (e) {
       console.error('loadAllData error:', e);
+    }
+  }, []);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const { data: notifs, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(200);
+      if (!error && notifs) {
+        setNotifications(notifs.map(toNotification));
+      }
+    } catch (e) {
+      console.warn('loadNotifications error:', e);
     }
   }, []);
 
@@ -572,7 +668,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u)); } catch {}
   }, []);
 
-  // Initial auth check
+  // Reference to Supabase realtime channel for broadcasting
+  const realtimeChannelRef = useRef<any>(null);
+
+  // Initial auth check & realtime subscription
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -580,6 +679,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await refreshCurrentUser();
         await loadUsers();
         await loadAllData();
+      } else {
+        await loadNotifications();
       }
     })();
 
@@ -597,8 +698,147 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })();
       }
     });
-    return () => listener.subscription.unsubscribe();
-  }, [refreshCurrentUser, loadUsers, loadAllData]);
+
+    // Supabase Realtime channel for live notifications and data sync
+    const liveChannel = supabase
+      .channel('rfu_live_global_channel', {
+        config: {
+          broadcast: { self: false },
+        },
+      })
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        (payload: any) => {
+          if (payload?.eventType === 'INSERT' && payload?.new) {
+            const incoming = toNotification(payload.new);
+            setNotifications((prev) => {
+              if (prev.some((x) => x.id === incoming.id)) return prev;
+              if (currentUser?.role === 'super_admin') {
+                playNotificationSound();
+              }
+              return [incoming, ...prev];
+            });
+          } else {
+            loadNotifications();
+          }
+        }
+      )
+      .on(
+        'broadcast',
+        { event: 'notification_created' },
+        (msg: any) => {
+          if (msg?.payload) {
+            const notif = msg.payload as AppNotification;
+            setNotifications((prev) => {
+              if (prev.some((x) => x.id === notif.id)) return prev;
+              if (currentUser?.role === 'super_admin') {
+                playNotificationSound();
+              }
+              return [notif, ...prev];
+            });
+          }
+        }
+      )
+      .on(
+        'broadcast',
+        { event: 'data_changed' },
+        () => {
+          loadAllData();
+          loadNotifications();
+        }
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractors' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_records' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_records' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_salaries' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'departments' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_departments' }, () => { loadAllData(); })
+      .subscribe();
+
+    realtimeChannelRef.current = liveChannel;
+
+    return () => {
+      listener.subscription.unsubscribe();
+      supabase.removeChannel(liveChannel);
+      realtimeChannelRef.current = null;
+    };
+  }, [refreshCurrentUser, loadUsers, loadAllData, loadNotifications, currentUser?.role]);
+
+  // Instant Cross-Tab Synchronization (0ms across browser tabs/windows)
+  useEffect(() => {
+    if (!liveBroadcastChannel) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      const { type, payload } = event.data || {};
+      if (type === 'NOTIFICATION_CREATED' && payload) {
+        setNotifications((prev) => {
+          if (prev.some((x) => x.id === payload.id)) return prev;
+          if (currentUser?.role === 'super_admin') {
+            playNotificationSound();
+          }
+          return [payload, ...prev];
+        });
+      } else if (type === 'NOTIFICATIONS_READ_ALL') {
+        setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      } else if (type === 'NOTIFICATION_READ' && payload) {
+        setNotifications((prev) => prev.map((n) => (n.id === payload ? { ...n, isRead: true } : n)));
+      } else if (type === 'NOTIFICATION_DELETED' && payload) {
+        setNotifications((prev) => prev.filter((n) => n.id !== payload));
+      } else if (type === 'DATA_CHANGED') {
+        loadAllData();
+      }
+    };
+
+    liveBroadcastChannel.addEventListener('message', handleMessage);
+
+    // Cross-tab storage fallback
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === NOTIFICATIONS_STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setNotifications(parsed);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      liveBroadcastChannel.removeEventListener('message', handleMessage);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [currentUser?.role, loadAllData]);
+
+  // Periodic Heartbeat Polling (every 4 seconds for Super Admin & on tab focus)
+  useEffect(() => {
+    if (currentUser?.role !== 'super_admin') return;
+
+    const pollInterval = setInterval(() => {
+      loadNotifications();
+    }, 4000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        loadNotifications();
+        loadAllData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [currentUser?.role, loadNotifications, loadAllData]);
+
 
   const hasPermission = useCallback((module: ModuleKey, action: PermissionAction): boolean => {
     if (!currentUser) return false;
@@ -644,6 +884,98 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...prev,
     ]);
   }, [currentUser, settings.adminName]);
+
+  // ==================================================
+  // NOTIFICATIONS
+  // ==================================================
+
+  const createNotification = useCallback(async (n: Omit<AppNotification, 'id' | 'createdAt' | 'isRead' | 'actorName'> & { actorName?: string }) => {
+    const currentActorName = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    const actorName = n.actorName || currentActorName;
+    const actorId = n.actorId || currentUser?.id;
+
+    const newNotif: AppNotification = {
+      ...n,
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      actorId,
+      actorName,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    // 1. Always store notification in memory and localStorage so it is immediately visible
+    setNotifications((prev) => [newNotif, ...prev.filter((x) => x.id !== newNotif.id)]);
+
+    // 2. Play sound if super admin triggers or receives action
+    if (currentUser?.role === 'super_admin') {
+      playNotificationSound();
+    }
+
+    // 3. Instant 0ms Cross-tab broadcast
+    broadcastLiveEvent('NOTIFICATION_CREATED', newNotif);
+
+    // 4. Global Supabase Realtime broadcast to other connected devices
+    try {
+      realtimeChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'notification_created',
+        payload: newNotif,
+      });
+    } catch {}
+
+    // 5. Persist to Supabase table
+    try {
+      const row = {
+        actor_id: actorId || null,
+        actor_name: actorName,
+        action: n.action,
+        entity_type: n.entityType,
+        entity_id: n.entityId || null,
+        entity_title: n.entityTitle || '',
+        message: n.message,
+        target_url: n.targetUrl || '/dashboard',
+        is_read: false,
+      };
+      const { data, error } = await supabase.from('notifications').insert(row).select().single();
+      if (data && !error) {
+        setNotifications((prev) => prev.map((x) => (x.id === newNotif.id ? toNotification(data) : x)));
+      }
+    } catch (e) {
+      console.warn('Could not save notification to Supabase:', e);
+    }
+  }, [currentUser]);
+
+
+  const markNotificationAsRead = useCallback(async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    broadcastLiveEvent('NOTIFICATION_READ', id);
+    try {
+      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    } catch (e) {
+      console.warn('markNotificationAsRead error:', e);
+    }
+  }, []);
+
+  const markAllNotificationsAsRead = useCallback(async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    broadcastLiveEvent('NOTIFICATIONS_READ_ALL');
+    try {
+      await supabase.from('notifications').update({ is_read: true }).eq('is_read', false);
+    } catch (e) {
+      console.warn('markAllNotificationsAsRead error:', e);
+    }
+  }, []);
+
+  const deleteNotification = useCallback(async (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    broadcastLiveEvent('NOTIFICATION_DELETED', id);
+    try {
+      await supabase.from('notifications').delete().eq('id', id);
+    } catch (e) {
+      console.warn('deleteNotification error:', e);
+    }
+  }, []);
+
 
   // ==================================================
   // AUTH
@@ -874,8 +1206,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
 
     logActivity({ action: `Created user ${u.fullName} (${u.role})`, entity: 'user', entityId: newUserId });
+    const actor = currentUser?.fullName || 'Super Admin';
+    createNotification({
+      action: 'CREATE',
+      entityType: 'user',
+      entityId: newUserId,
+      entityTitle: `${u.fullName} (${u.role})`,
+      message: `${actor} added new user — ${u.fullName} (${u.role})`,
+      targetUrl: `/users/${newUserId}`,
+    });
     return finalUser;
-  }, [currentUser, logActivity, loadUsers, updateUserPermissions]);
+  }, [currentUser, logActivity, loadUsers, updateUserPermissions, createNotification]);
 
   const updateUser = useCallback(async (id: string, patch: Partial<User>) => {
     // 1. Sync credentials with auth.users via RPC
@@ -915,14 +1256,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     setUsers((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
     if (currentUser?.id === id) setCurrentUser((cu) => (cu ? { ...cu, ...patch } : cu));
+    const targetUser = users.find((x) => x.id === id);
+    const uName = patch.fullName || targetUser?.fullName || id;
+    const actor = currentUser?.fullName || 'Super Admin';
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'user',
+      entityId: id,
+      entityTitle: uName,
+      message: `${actor} updated user profile — ${uName}`,
+      targetUrl: `/users/${id}`,
+    });
     await loadUsers();
-  }, [currentUser, loadUsers]);
+  }, [currentUser, users, loadUsers, createNotification]);
 
   const setUserStatus = useCallback(async (id: string, status: EntityStatus) => {
     await supabase.from('profiles').update({ status }).eq('id', id);
     setUsers((prev) => prev.map((x) => (x.id === id ? { ...x, status } : x)));
     logActivity({ action: `${status === 'Active' ? 'Enabled' : 'Disabled'} user`, entity: 'user', entityId: id });
-  }, [logActivity]);
+    const targetUser = users.find((x) => x.id === id);
+    const uName = targetUser?.fullName || id;
+    const actor = currentUser?.fullName || 'Super Admin';
+    createNotification({
+      action: 'STATUS_CHANGE',
+      entityType: 'user',
+      entityId: id,
+      entityTitle: uName,
+      message: `${actor} changed user status to ${status} — ${uName}`,
+      targetUrl: `/users/${id}`,
+    });
+  }, [currentUser, users, logActivity, createNotification]);
 
   const setUserPassword = useCallback(async (id: string, newPassword: string) => {
     const trimmed = newPassword.trim();
@@ -951,7 +1314,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const u = users.find((x) => x.id === id);
     logActivity({ action: `Updated password for user ${u?.fullName || id}`, entity: 'user', entityId: id });
-  }, [users, logActivity]);
+    const actor = currentUser?.fullName || 'Super Admin';
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'user',
+      entityId: id,
+      entityTitle: u?.fullName || id,
+      message: `${actor} updated password for user — ${u?.fullName || id}`,
+      targetUrl: `/users/${id}`,
+    });
+  }, [currentUser, users, logActivity, createNotification]);
 
   const deleteUser = useCallback(async (id: string) => {
     const u = users.find((x) => x.id === id);
@@ -968,11 +1340,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await supabase.rpc('admin_delete_user', { p_user_id: id });
     } catch (e) {}
 
-    if (u) {
-      logActivity({ action: `Deleted user ${u.fullName}`, entity: 'user', entityId: id });
-    }
+    const uName = u?.fullName || 'User';
+    logActivity({ action: `Deleted user ${uName}`, entity: 'user', entityId: id });
+    const actor = currentUser?.fullName || 'Super Admin';
+    createNotification({
+      action: 'DELETE',
+      entityType: 'user',
+      entityId: id,
+      entityTitle: uName,
+      message: `${actor} deleted user — ${uName}`,
+      targetUrl: `/users`,
+    });
     setUsers((prev) => prev.filter((x) => x.id !== id));
-  }, [users, logActivity]);
+  }, [currentUser, users, logActivity, createNotification]);
 
 
 
@@ -996,8 +1376,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const vehicle = data ? toVehicle(data) : { ...v, id: `veh-${Date.now()}`, createdAt: new Date().toISOString(), createdBy: currentUser?.id };
     setVehicles((prev) => [vehicle, ...prev]);
     logActivity({ action: `Created vehicle ${vehicle.number}`, entity: 'vehicle', entityId: vehicle.id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'vehicle',
+      entityId: vehicle.id,
+      entityTitle: `${vehicle.number} (${vehicle.model || vehicle.type})`,
+      message: `${actor} added a new vehicle — ${vehicle.model || vehicle.type} (${vehicle.number})`,
+      targetUrl: `/vehicles/${vehicle.id}`,
+    });
     return vehicle;
-  }, [currentUser, logActivity]);
+  }, [currentUser, logActivity, createNotification]);
 
   const updateVehicle = useCallback(async (id: string, patch: Partial<Vehicle>) => {
     const row: any = {};
@@ -1022,16 +1411,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       if (changes.length) logActivity({ action: `Edited vehicle ${old.number} — ${changes.join(', ')}`, entity: 'vehicle', entityId: id });
     }
-  }, [vehicles, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    const num = patch.number || old?.number || id;
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'vehicle',
+      entityId: id,
+      entityTitle: num,
+      message: `${actor} edited vehicle — ${num}`,
+      targetUrl: `/vehicles/${id}`,
+    });
+  }, [currentUser, vehicles, logActivity, createNotification]);
 
   const deleteVehicle = useCallback(async (id: string) => {
     const v = vehicles.find((x) => x.id === id);
+    const num = v?.number || id;
     await supabase.from('vehicles').delete().eq('id', id);
-    if (v) logActivity({ action: `Deleted vehicle ${v.number}`, entity: 'vehicle', entityId: id });
+    logActivity({ action: `Deleted vehicle ${num}`, entity: 'vehicle', entityId: id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'vehicle',
+      entityId: id,
+      entityTitle: num,
+      message: `${actor} deleted vehicle — ${num}`,
+      targetUrl: `/vehicles`,
+    });
     setVehicles((prev) => prev.filter((x) => x.id !== id));
     setMonthlyRecords((prev) => prev.filter((r) => r.vehicleId !== id));
     setDrivers((prev) => prev.map((d) => (d.vehicleId === id ? { ...d, vehicleId: undefined } : d)));
-  }, [vehicles, logActivity]);
+  }, [currentUser, vehicles, logActivity, createNotification]);
 
   // ==================================================
   // DRIVERS
@@ -1058,8 +1467,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setVehicles((prev) => prev.map((v) => (v.id === driver.vehicleId ? { ...v, driverId: driver.id } : v)));
     }
     logActivity({ action: `Created driver ${driver.fullName}`, entity: 'driver', entityId: driver.id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'driver',
+      entityId: driver.id,
+      entityTitle: driver.fullName,
+      message: `${actor} added a new driver — ${driver.fullName}`,
+      targetUrl: `/drivers/${driver.id}`,
+    });
     return driver;
-  }, [currentUser, logActivity]);
+  }, [currentUser, logActivity, createNotification]);
 
   const updateDriver = useCallback(async (id: string, patch: Partial<Driver>) => {
     const row: any = {};
@@ -1092,16 +1510,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       if (changes.length) logActivity({ action: `Edited driver ${old.fullName} — ${changes.join(', ')}`, entity: 'driver', entityId: id });
     }
-  }, [drivers, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    const dName = patch.fullName || old?.fullName || id;
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'driver',
+      entityId: id,
+      entityTitle: dName,
+      message: `${actor} edited driver — ${dName}`,
+      targetUrl: `/drivers/${id}`,
+    });
+  }, [currentUser, drivers, logActivity, createNotification]);
 
   const deleteDriver = useCallback(async (id: string) => {
     const d = drivers.find((x) => x.id === id);
+    const dName = d?.fullName || 'Driver';
     await supabase.from('drivers').delete().eq('id', id);
-    if (d) logActivity({ action: `Deleted driver ${d.fullName}`, entity: 'driver', entityId: id });
+    logActivity({ action: `Deleted driver ${dName}`, entity: 'driver', entityId: id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'driver',
+      entityId: id,
+      entityTitle: dName,
+      message: `${actor} deleted driver — ${dName}`,
+      targetUrl: `/drivers`,
+    });
     setDrivers((prev) => prev.filter((x) => x.id !== id));
     setVehicles((prev) => prev.map((v) => (v.driverId === id ? { ...v, driverId: undefined } : v)));
     setSalaries((prev) => prev.filter((s) => s.driverId !== id));
-  }, [drivers, logActivity]);
+  }, [currentUser, drivers, logActivity, createNotification]);
+
 
   // ==================================================
   // SUBCONTRACTORS
@@ -1122,8 +1561,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const sub = data ? toSubcontractor(data) : { ...s, id: `sub-${Date.now()}`, createdAt: new Date().toISOString(), createdBy: currentUser?.id };
     setSubcontractors((prev) => [sub, ...prev]);
     logActivity({ action: `Created subcontractor ${sub.name}`, entity: 'subcontractor', entityId: sub.id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'subcontractor',
+      entityId: sub.id,
+      entityTitle: sub.name,
+      message: `${actor} added subcontractor — ${sub.name}`,
+      targetUrl: `/subcontractors/${sub.id}`,
+    });
     return sub;
-  }, [currentUser, logActivity]);
+  }, [currentUser, logActivity, createNotification]);
 
   const updateSubcontractor = useCallback(async (id: string, patch: Partial<Subcontractor>) => {
     const row: any = {};
@@ -1147,15 +1595,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       if (changes.length) logActivity({ action: `Edited subcontractor ${old.name} — ${changes.join(', ')}`, entity: 'subcontractor', entityId: id });
     }
-  }, [subcontractors, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    const sName = patch.name || old?.name || id;
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'subcontractor',
+      entityId: id,
+      entityTitle: sName,
+      message: `${actor} edited subcontractor — ${sName}`,
+      targetUrl: `/subcontractors/${id}`,
+    });
+  }, [currentUser, subcontractors, logActivity, createNotification]);
 
   const deleteSubcontractor = useCallback(async (id: string) => {
     const s = subcontractors.find((x) => x.id === id);
+    const sName = s?.name || 'Subcontractor';
     await supabase.from('subcontractors').delete().eq('id', id);
-    if (s) logActivity({ action: `Deleted subcontractor ${s.name}`, entity: 'subcontractor', entityId: id });
+    logActivity({ action: `Deleted subcontractor ${sName}`, entity: 'subcontractor', entityId: id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'subcontractor',
+      entityId: id,
+      entityTitle: sName,
+      message: `${actor} deleted subcontractor — ${sName}`,
+      targetUrl: `/subcontractors`,
+    });
     setSubcontractors((prev) => prev.filter((x) => x.id !== id));
     setVehicles((prev) => prev.map((v) => (v.ownerId === id ? { ...v, ownerType: 'Ride for U' as const, ownerId: undefined } : v)));
-  }, [subcontractors, logActivity]);
+  }, [currentUser, subcontractors, logActivity, createNotification]);
 
   // ==================================================
   // SALARIES
@@ -1175,8 +1643,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const sal = data ? toSalary(data) : { ...s, id: `sal-${Date.now()}`, createdAt: new Date().toISOString(), createdBy: currentUser?.id };
     setSalaries((prev) => [sal, ...prev]);
     logActivity({ action: `Added salary record for ${s.month}`, entity: 'salary', entityId: sal.id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    const driver = drivers.find((d) => d.id === s.driverId);
+    createNotification({
+      action: 'CREATE',
+      entityType: 'salary',
+      entityId: sal.id,
+      entityTitle: `${driver?.fullName || 'Driver'} (${s.month})`,
+      message: `${actor} recorded salary for ${driver?.fullName || 'Driver'} — ${s.month} (Paid: Rs. ${s.paidAmount.toLocaleString()})`,
+      targetUrl: `/drivers/${s.driverId}`,
+    });
     return sal;
-  }, [currentUser, logActivity]);
+  }, [currentUser, drivers, logActivity, createNotification]);
 
   const updateSalary = useCallback(async (id: string, patch: Partial<SalaryRecord>) => {
     const row: any = {};
@@ -1198,15 +1676,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       });
       if (changes.length) logActivity({ action: `Edited salary record — ${changes.join(', ')}`, entity: 'salary', entityId: id });
+      const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+      const driver = drivers.find((d) => d.id === (patch.driverId || old.driverId));
+      createNotification({
+        action: 'UPDATE',
+        entityType: 'salary',
+        entityId: id,
+        entityTitle: `${driver?.fullName || 'Driver'} (${old.month})`,
+        message: `${actor} updated salary for ${driver?.fullName || 'Driver'} — ${old.month}`,
+        targetUrl: `/drivers/${patch.driverId || old.driverId}`,
+      });
     }
-  }, [salaries, logActivity]);
+  }, [currentUser, salaries, drivers, logActivity, createNotification]);
 
   const deleteSalary = useCallback(async (id: string) => {
     const s = salaries.find((x) => x.id === id);
+    const driver = drivers.find((d) => d.id === s?.driverId);
+    const title = `${driver?.fullName || 'Driver'} (${s?.month || 'Salary'})`;
     await supabase.from('driver_salaries').delete().eq('id', id);
-    if (s) logActivity({ action: `Deleted salary record for ${s.month}`, entity: 'salary', entityId: id });
+    logActivity({ action: `Deleted salary record for ${s?.month || 'driver'}`, entity: 'salary', entityId: id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'salary',
+      entityId: id,
+      entityTitle: title,
+      message: `${actor} deleted salary record for ${title}`,
+      targetUrl: `/drivers/${s?.driverId || ''}`,
+    });
     setSalaries((prev) => prev.filter((x) => x.id !== id));
-  }, [salaries, logActivity]);
+  }, [currentUser, salaries, drivers, logActivity, createNotification]);
 
   // ==================================================
   // MONTHLY RECORDS
@@ -1236,8 +1735,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     setMonthlyRecords((prev) => [rec, ...prev]);
     logActivity({ action: `Created monthly record for ${month}`, entity: 'monthly-record', entityId: rec.id });
+    const vehicle = vehicles.find((v) => v.id === vehicleId);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'monthly_record',
+      entityId: rec.id,
+      entityTitle: `${vehicle?.number || 'Vehicle'} (${month})`,
+      message: `${actor} created monthly record for ${vehicle?.number || 'Vehicle'} — ${month}`,
+      targetUrl: `/monthly-records/${rec.id}`,
+    });
     return rec;
-  }, [monthlyRecords, currentUser, logActivity]);
+  }, [monthlyRecords, currentUser, vehicles, logActivity, createNotification]);
 
   const addDailyRecord = useCallback(async (recordId: string, dr: Omit<DailyRecord, 'id'>) => {
     const row: any = {
@@ -1260,7 +1769,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ...r, dailyRecords };
     }));
     logActivity({ action: `Added daily entry for ${dr.date} — Rs. ${dr.amount.toLocaleString()}`, entity: 'daily-record', entityId: recordId });
-  }, [monthlyRecords, logActivity]);
+    const rec = monthlyRecords.find((r) => r.id === recordId);
+    const vehicle = vehicles.find((v) => v.id === rec?.vehicleId);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'daily_record',
+      entityId: recordId,
+      entityTitle: `${vehicle?.number || 'Vehicle'} (${dr.date})`,
+      message: `${actor} added daily duty for ${vehicle?.number || 'Vehicle'} — ${dr.date} (Rs. ${dr.amount.toLocaleString()})`,
+      targetUrl: `/monthly-records/${recordId}`,
+    });
+  }, [monthlyRecords, vehicles, currentUser, logActivity, createNotification]);
 
   const updateDailyRecord = useCallback(async (recordId: string, drId: string, patch: Partial<DailyRecord>) => {
     const row: any = {};
@@ -1286,7 +1806,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dailyRecords: r.dailyRecords.map((d) => (d.id === drId ? { ...d, ...patch } : d)),
       };
     }));
-  }, [logActivity]);
+    const rec = monthlyRecords.find((r) => r.id === recordId);
+    const vehicle = vehicles.find((v) => v.id === rec?.vehicleId);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'daily_record',
+      entityId: recordId,
+      entityTitle: `${vehicle?.number || 'Vehicle'} (Duty update)`,
+      message: `${actor} updated daily duty entry for ${vehicle?.number || 'Vehicle'}`,
+      targetUrl: `/monthly-records/${recordId}`,
+    });
+  }, [monthlyRecords, vehicles, currentUser, logActivity, createNotification]);
 
   const deleteDailyRecord = useCallback(async (recordId: string, drId: string) => {
     await supabase.from('daily_records').delete().eq('id', drId);
@@ -1296,7 +1827,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (dr) logActivity({ action: `Deleted daily entry for ${dr.date} — Rs. ${dr.amount.toLocaleString()}`, entity: 'daily-record', entityId: drId });
       return { ...r, dailyRecords: r.dailyRecords.filter((d) => d.id !== drId) };
     }));
-  }, [logActivity]);
+    const rec = monthlyRecords.find((r) => r.id === recordId);
+    const vehicle = vehicles.find((v) => v.id === rec?.vehicleId);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'daily_record',
+      entityId: recordId,
+      entityTitle: `${vehicle?.number || 'Vehicle'} (Duty removed)`,
+      message: `${actor} deleted daily duty entry for ${vehicle?.number || 'Vehicle'}`,
+      targetUrl: `/monthly-records/${recordId}`,
+    });
+  }, [monthlyRecords, vehicles, currentUser, logActivity, createNotification]);
 
   // ==================================================
   // EXPENSES (old vehicle-monthly expenses mapped to business expenses for Vehicle)
@@ -1341,7 +1883,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ...r, expenses: [...r.expenses, exp] };
     }));
     logActivity({ action: `Added ${cat?.name || 'expense'} — Rs. ${e.amount.toLocaleString()}`, entity: 'expense', entityId: expId });
-  }, [monthlyRecords, categories, vehicles, currentUser, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'expense',
+      entityId: expId,
+      entityTitle: `${vehicle?.number || 'Vehicle'} (Rs. ${e.amount.toLocaleString()})`,
+      message: `${actor} added ${cat?.name || 'expense'} — Rs. ${e.amount.toLocaleString()} for ${vehicle?.number || 'Vehicle'}`,
+      targetUrl: `/monthly-records/${recordId}`,
+    });
+  }, [monthlyRecords, categories, vehicles, currentUser, logActivity, createNotification]);
 
   const updateExpense = useCallback(async (recordId: string, eId: string, patch: Partial<Expense>) => {
     const row: any = {};
@@ -1365,7 +1916,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       return { ...r, expenses: r.expenses.map((e) => (e.id === eId ? { ...e, ...patch } : e)) };
     }));
-  }, [logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'expense',
+      entityId: eId,
+      entityTitle: `Expense update`,
+      message: `${actor} updated expense entry`,
+      targetUrl: `/monthly-records/${recordId}`,
+    });
+  }, [currentUser, logActivity, createNotification]);
 
   const deleteExpense = useCallback(async (recordId: string, eId: string) => {
     await supabase.from('expenses').delete().eq('id', eId);
@@ -1376,7 +1936,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (e) logActivity({ action: `Deleted expense — Rs. ${e.amount.toLocaleString()}`, entity: 'expense', entityId: eId });
       return { ...r, expenses: r.expenses.filter((ex) => ex.id !== eId) };
     }));
-  }, [logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'expense',
+      entityId: eId,
+      entityTitle: `Expense removed`,
+      message: `${actor} deleted expense entry`,
+      targetUrl: `/monthly-records/${recordId}`,
+    });
+  }, [currentUser, logActivity, createNotification]);
 
   const getAllExpenses = useCallback((): { expense: Expense; recordId: string }[] => {
     const result: { expense: Expense; recordId: string }[] = [];
@@ -1416,7 +1985,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
     }));
     setMonthlyRecords((prev) => prev.map((r) => ({ ...r, expenses: r.expenses.map((e) => (e.id === expenseId ? { ...e, ...patch } : e)) })));
-  }, [businessExpenses, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'expense',
+      entityId: expenseId,
+      entityTitle: `Expense`,
+      message: `${actor} updated expense record`,
+      targetUrl: `/expenses`,
+    });
+  }, [currentUser, businessExpenses, logActivity, createNotification]);
 
   const deleteStandaloneExpense = useCallback(async (expenseId: string) => {
     await supabase.from('expenses').delete().eq('id', expenseId);
@@ -1424,7 +2002,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (e) logActivity({ action: `Deleted expense — Rs. ${e.amount.toLocaleString()}`, entity: 'expense', entityId: expenseId });
     setBusinessExpenses((prev) => prev.filter((e) => e.id !== expenseId));
     setMonthlyRecords((prev) => prev.map((r) => ({ ...r, expenses: r.expenses.filter((ex) => ex.id !== expenseId) })));
-  }, [businessExpenses, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'expense',
+      entityId: expenseId,
+      entityTitle: `Expense`,
+      message: `${actor} deleted expense record`,
+      targetUrl: `/expenses`,
+    });
+  }, [currentUser, businessExpenses, logActivity, createNotification]);
 
   // ==================================================
   // BUSINESS EXPENSES
@@ -1459,7 +2046,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { ...r, expenses: [...r.expenses, expItem] };
       }));
     }
-  }, [categories, currentUser, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'expense',
+      entityId: exp.id,
+      entityTitle: `${e.expenseFor}: ${e.relatedToName} (Rs. ${e.amount.toLocaleString()})`,
+      message: `${actor} added ${cat?.name || 'expense'} — Rs. ${e.amount.toLocaleString()} for ${e.expenseFor}: ${e.relatedToName}`,
+      targetUrl: `/expenses`,
+    });
+  }, [categories, currentUser, logActivity, createNotification]);
 
   const updateBusinessExpense = useCallback(async (id: string, patch: Partial<BusinessExpense>) => {
     const row: any = {};
@@ -1479,14 +2075,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       logActivity({ action: `Edited Expense`, entity: 'expense', entityId: id, oldValue: `Rs. ${old.amount.toLocaleString()}`, newValue: `Rs. ${patch.amount.toLocaleString()}` });
     }
     setBusinessExpenses((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-  }, [businessExpenses, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'expense',
+      entityId: id,
+      entityTitle: `Business Expense`,
+      message: `${actor} updated expense record`,
+      targetUrl: `/expenses`,
+    });
+  }, [currentUser, businessExpenses, logActivity, createNotification]);
 
   const deleteBusinessExpense = useCallback(async (id: string) => {
     await supabase.from('expenses').delete().eq('id', id);
     const e = businessExpenses.find((x) => x.id === id);
     if (e) logActivity({ action: `Deleted expense — Rs. ${e.amount.toLocaleString()}`, entity: 'expense', entityId: id });
     setBusinessExpenses((prev) => prev.filter((e) => e.id !== id));
-  }, [businessExpenses, logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'expense',
+      entityId: id,
+      entityTitle: `Business Expense`,
+      message: `${actor} deleted expense record`,
+      targetUrl: `/expenses`,
+    });
+  }, [currentUser, businessExpenses, logActivity, createNotification]);
+
 
   const getBusinessExpensesForEntity = useCallback((expenseFor: ExpenseFor, relatedToId: string, month?: string) => {
     return businessExpenses.filter((e) => {
@@ -1597,14 +2212,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const d = toDepartment(data);
         setDepartments((prev) => [...prev, d]);
         logActivity({ action: `Created department "${trimmed}"`, entity: 'department', entityId: d.id });
+        const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+        createNotification({
+          action: 'CREATE',
+          entityType: 'department',
+          entityId: d.id,
+          entityTitle: trimmed,
+          message: `${actor} added department — ${trimmed}`,
+          targetUrl: `/settings`,
+        });
         return d;
       }
     } catch (e) {}
     const localDept: Department = { id: `dept-${Date.now()}`, name: trimmed, notes: notes?.trim() || '', createdAt: new Date().toISOString() };
     setDepartments((prev) => [...prev, localDept]);
     logActivity({ action: `Created department "${trimmed}"`, entity: 'department', entityId: localDept.id });
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'CREATE',
+      entityType: 'department',
+      entityId: localDept.id,
+      entityTitle: trimmed,
+      message: `${actor} added department — ${trimmed}`,
+      targetUrl: `/settings`,
+    });
     return localDept;
-  }, [logActivity]);
+  }, [currentUser, logActivity, createNotification]);
 
   const updateDepartment = useCallback(async (id: string, name: string, notes?: string) => {
     const trimmed = name.trim();
@@ -1613,7 +2246,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (e) {}
     setDepartments((prev) => prev.map((d) => (d.id === id ? { ...d, name: trimmed, notes: notes !== undefined ? notes.trim() : d.notes } : d)));
     logActivity({ action: `Updated department "${trimmed}"`, entity: 'department', entityId: id });
-  }, [logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'UPDATE',
+      entityType: 'department',
+      entityId: id,
+      entityTitle: trimmed,
+      message: `${actor} updated department — ${trimmed}`,
+      targetUrl: `/settings`,
+    });
+  }, [currentUser, logActivity, createNotification]);
 
   const deleteDepartment = useCallback(async (id: string) => {
     try {
@@ -1621,7 +2263,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (e) {}
     setDepartments((prev) => prev.filter((d) => d.id !== id));
     logActivity({ action: `Deleted department`, entity: 'department', entityId: id });
-  }, [logActivity]);
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'department',
+      entityId: id,
+      entityTitle: 'Department',
+      message: `${actor} deleted department`,
+      targetUrl: `/settings`,
+    });
+  }, [currentUser, logActivity, createNotification]);
 
   const addDepartmentEntry = useCallback(async (recordId: string, entry: Omit<DepartmentEntry, 'id' | 'createdAt'>) => {
     const row: any = {
@@ -1690,35 +2341,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [logActivity]);
 
   // ==================================================
-  // KM PRICING SLABS & RATES
-  // ==================================================
-
-  const getRateForKm = useCallback((km: number): number | null => {
-    const slabs = settings.kmRates || DEFAULT_KM_SLABS;
-    const slab = slabs.find((s) => km >= s.minKm && km <= s.maxKm);
-    return slab ? slab.rate : null;
-  }, [settings.kmRates]);
-
-  const addKmSlab = useCallback(async (slab: Omit<KmSlab, 'id'>) => {
-    const newSlab: KmSlab = { id: `km-${Date.now()}`, ...slab };
-    const updated = [...(settings.kmRates || DEFAULT_KM_SLABS), newSlab];
-    await updateSettings({ kmRates: updated });
-    logActivity({ action: `Added KM pricing slab (${slab.minKm}-${slab.maxKm} KM = Rs. ${slab.rate})`, entity: 'settings' });
-  }, [settings.kmRates, logActivity]);
-
-  const updateKmSlab = useCallback(async (id: string, patch: Partial<KmSlab>) => {
-    const updated = (settings.kmRates || DEFAULT_KM_SLABS).map((s) => (s.id === id ? { ...s, ...patch } : s));
-    await updateSettings({ kmRates: updated });
-    logActivity({ action: `Updated KM pricing slab`, entity: 'settings' });
-  }, [settings.kmRates, logActivity]);
-
-  const deleteKmSlab = useCallback(async (id: string) => {
-    const updated = (settings.kmRates || DEFAULT_KM_SLABS).filter((s) => s.id !== id);
-    await updateSettings({ kmRates: updated });
-    logActivity({ action: `Deleted KM pricing slab`, entity: 'settings' });
-  }, [settings.kmRates, logActivity]);
-
-  // ==================================================
   // SETTINGS
   // ==================================================
 
@@ -1750,8 +2372,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ==================================================
+  // KM PRICING SLABS & RATES
+  // ==================================================
+
+  const getRateForKm = useCallback((km: number): number | null => {
+    const slabs = settings.kmRates || DEFAULT_KM_SLABS;
+    const slab = slabs.find((s) => km >= s.minKm && km <= s.maxKm);
+    return slab ? slab.rate : null;
+  }, [settings.kmRates]);
+
+  const addKmSlab = useCallback(async (slab: Omit<KmSlab, 'id'>) => {
+    const newSlab: KmSlab = { id: `km-${Date.now()}`, ...slab };
+    const updated = [...(settings.kmRates || DEFAULT_KM_SLABS), newSlab];
+    await updateSettings({ kmRates: updated });
+    logActivity({ action: `Added KM pricing slab (${slab.minKm}-${slab.maxKm} KM = Rs. ${slab.rate})`, entity: 'settings' });
+  }, [settings.kmRates, logActivity, updateSettings]);
+
+  const updateKmSlab = useCallback(async (id: string, patch: Partial<KmSlab>) => {
+    const updated = (settings.kmRates || DEFAULT_KM_SLABS).map((s) => (s.id === id ? { ...s, ...patch } : s));
+    await updateSettings({ kmRates: updated });
+    logActivity({ action: `Updated KM pricing slab`, entity: 'settings' });
+  }, [settings.kmRates, logActivity, updateSettings]);
+
+  const deleteKmSlab = useCallback(async (id: string) => {
+    const updated = (settings.kmRates || DEFAULT_KM_SLABS).filter((s) => s.id !== id);
+    await updateSettings({ kmRates: updated });
+    logActivity({ action: `Deleted KM pricing slab`, entity: 'settings' });
+  }, [settings.kmRates, logActivity, updateSettings]);
+
+
   const value: StoreContextValue = {
     vehicles, drivers, subcontractors, monthlyRecords, categories, departments, salaries, activity, settings, businessExpenses,
+    notifications: visibleNotifications, unreadNotificationsCount,
+    createNotification, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification,
+
     users, currentUser,
     login, logout, resetPasswordForEmail, updatePassword, getCurrentUser, hasPermission, canAccessModule,
     canEditRecord, canDeleteRecord,
@@ -1772,6 +2427,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     getRateForKm, addKmSlab, updateKmSlab, deleteKmSlab,
     updateSettings, logActivity,
   };
+
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

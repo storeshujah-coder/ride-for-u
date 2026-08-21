@@ -197,10 +197,12 @@ export interface DepartmentEntry {
   departmentId: string;
   departmentName?: string;
   payment: number;
+  date?: string;
   remarks?: string;
   createdBy?: string;
   createdAt?: string;
 }
+
 
 export interface MonthlyRecord {
   id: string;
@@ -241,3 +243,32 @@ export interface Settings {
   appearance: 'light' | 'dark';
   kmRates?: KmSlab[];
 }
+
+export type NotificationActionType = 'CREATE' | 'UPDATE' | 'DELETE' | 'STATUS_CHANGE';
+
+export type NotificationEntityType =
+  | 'vehicle'
+  | 'driver'
+  | 'subcontractor'
+  | 'monthly_record'
+  | 'daily_record'
+  | 'expense'
+  | 'salary'
+  | 'user'
+  | 'department'
+  | 'settings';
+
+export interface AppNotification {
+  id: string;
+  actorId?: string;
+  actorName: string;
+  action: NotificationActionType;
+  entityType: NotificationEntityType;
+  entityId?: string;
+  entityTitle: string;
+  message: string;
+  targetUrl: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
