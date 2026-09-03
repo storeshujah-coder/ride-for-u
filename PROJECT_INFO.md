@@ -97,6 +97,21 @@ Located in `supabase/`:
 - **User Management & RBAC**: Super Admin vs Staff granular permission controls (View, Add, Edit, Delete per module).
 - **Live Notifications**: 0ms cross-tab sync, Supabase Realtime WebSockets, Web Audio API sound chime, and bell ringing animations.
 - **Password Reset & Recovery**: Direct email reset link and 6-digit OTP verification support.
+- **Supabase Keepalive & Health Check**: Production endpoint at `/api/health` performing read-only queries with 5s timeout to prevent inactivity pauses on the Supabase Free Plan.
+
+---
+
+## 🩺 8. Supabase Health Check & Activity Endpoint
+
+- **Endpoint**: `GET /api/health`
+- **Method**: `GET`
+- **Query Type**: Read-only `SELECT id FROM departments LIMIT 1` (zero writes, no fake records)
+- **Timeout**: 5,000ms (`AbortSignal`)
+- **Responses**:
+  - `200 OK`: `{"status":"ok","timestamp":"...","database":"connected","latency_ms":...}`
+  - `503 Service Unavailable`: `{"status":"error","timestamp":"...","message":"...","error":"..."}`
+- **Cron Recommendation**: Call every 3 days using [cron-job.org](https://cron-job.org) (`0 12 */3 * *`) or GitHub Actions workflow (`.github/workflows/supabase-keepalive.yml`).
 
 ---
 *Created on: 2026-08-21 | Maintained by: Ride for U Team*
+
