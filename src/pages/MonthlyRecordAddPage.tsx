@@ -172,7 +172,7 @@ function SearchableVehicleSelect({
 }
 
 export function MonthlyRecordAddPage() {
-  const { vehicles, monthlyRecords, saveMonthlyRecordBulk, getRateForKm } = useStore();
+  const { vehicles, monthlyRecords, saveMonthlyRecordBulk, getRateForKm, settings } = useStore();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -383,7 +383,7 @@ export function MonthlyRecordAddPage() {
                         <th className="px-3 py-3 w-16">Date</th>
                         <th className="px-3 py-3 w-12">Day</th>
                         <th className="px-3 py-3 w-24">Type</th>
-                        <th className="px-3 py-3 w-28">KM (Auto Rate)</th>
+                        <th className="px-3 py-3 w-28">{settings.autoKmPricing !== false ? 'KM (Auto Rate)' : 'KM (Manual)'}</th>
                         <th className="px-3 py-3 min-w-[180px]">Amount / Routes (PKR)</th>
                         <th className="px-3 py-3 min-w-[180px]">Details / Remarks</th>
                       </tr>

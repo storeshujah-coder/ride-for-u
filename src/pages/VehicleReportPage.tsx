@@ -555,7 +555,7 @@ export function VehicleReportPage() {
         <div className="space-y-4">
           <Input label="Date" type="date" value={editDailyDate} onChange={setEditDailyDate} required />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="KM (Auto Rate)" type="number" value={editDailyKm} onChange={handleDailyKmChange} placeholder="e.g. 75" />
+            <Input label={settings.autoKmPricing !== false ? "KM (Auto Rate)" : "KM (Manual)"} type="number" value={editDailyKm} onChange={handleDailyKmChange} placeholder="e.g. 75" />
             <Input label="Duty Amount (PKR)" type="number" value={editDailyAmount} onChange={setEditDailyAmount} placeholder="10000" required />
           </div>
           <Input label="Details / Remarks" value={editDailyDetails} onChange={setEditDailyDetails} placeholder="Details" />

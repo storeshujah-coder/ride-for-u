@@ -242,7 +242,9 @@ export interface Settings {
   adminName: string;
   appearance: 'light' | 'dark';
   kmRates?: KmSlab[];
+  autoKmPricing?: boolean; // When true (default), entering KM auto-calculates rate from slabs. When false, manual entry only.
 }
+
 
 export type NotificationActionType = 'CREATE' | 'UPDATE' | 'DELETE' | 'STATUS_CHANGE';
 

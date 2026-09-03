@@ -144,6 +144,20 @@ function toSettings(row: any): Settings {
       }
     } catch (e) {}
   }
+  let autoKmPricing = true;
+  if (row.auto_km_pricing !== undefined && row.auto_km_pricing !== null) {
+    autoKmPricing = Boolean(row.auto_km_pricing);
+  } else {
+    try {
+      const stored = localStorage.getItem('rfu-settings-cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.autoKmPricing !== undefined) {
+          autoKmPricing = Boolean(parsed.autoKmPricing);
+        }
+      }
+    } catch {}
+  }
   return {
     companyName: row.company_name || 'Ride for U',
     currency: row.currency || 'Rs.',
@@ -151,6 +165,7 @@ function toSettings(row: any): Settings {
     adminName: row.admin_name || 'Super Admin',
     appearance: (row.appearance || 'light') as 'light' | 'dark',
     kmRates,
+    autoKmPricing,
   };
 }
 
@@ -443,8 +458,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   ]);
   const [salaries, setSalaries] = useState<SalaryRecord[]>([]);
   const [activity, setActivity] = useState<ActivityLog[]>([]);
-  const [settings, setSettings] = useState<Settings>({
-    companyName: 'Ride for U', currency: 'Rs.', commissionRate: 2.5, adminName: 'Super Admin', appearance: 'light',
+  const [settings, setSettings] = useState<Settings>(() => {
+    try {
+      const stored = localStorage.getItem('rfu-settings-cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return {
+          companyName: parsed.companyName || 'Ride for U',
+          currency: parsed.currency || 'Rs.',
+          commissionRate: Number(parsed.commissionRate) || 2.5,
+          adminName: parsed.adminName || 'Super Admin',
+          appearance: parsed.appearance || 'light',
+          kmRates: parsed.kmRates || DEFAULT_KM_SLABS,
+          autoKmPricing: parsed.autoKmPricing !== undefined ? Boolean(parsed.autoKmPricing) : true,
+        };
+      }
+    } catch {}
+    return {
+      companyName: 'Ride for U',
+      currency: 'Rs.',
+      commissionRate: 2.5,
+      adminName: 'Super Admin',
+      appearance: 'light',
+      kmRates: DEFAULT_KM_SLABS,
+      autoKmPricing: true,
+    };
   });
   const [businessExpenses, setBusinessExpenses] = useState<BusinessExpense[]>([]);
 
@@ -2352,6 +2390,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (s.adminName !== undefined) row.admin_name = s.adminName;
     if (s.appearance !== undefined) row.appearance = s.appearance;
     if (s.kmRates !== undefined) row.km_rates = JSON.stringify(s.kmRates);
+    if (s.autoKmPricing !== undefined) row.auto_km_pricing = s.autoKmPricing;
     if (Object.keys(row).length) {
       try {
         const { data: existing } = await supabase.from('settings').select('id').limit(1);
@@ -2360,9 +2399,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         } else {
           await supabase.from('settings').insert(row);
         }
-      } catch (e) {}
+      } catch (e) {
+        if (row.auto_km_pricing !== undefined) {
+          try {
+            const rowCopy = { ...row };
+            delete rowCopy.auto_km_pricing;
+            const { data: existing2 } = await supabase.from('settings').select('id').limit(1);
+            if (existing2 && existing2[0]) {
+              await supabase.from('settings').update(rowCopy).eq('id', existing2[0].id);
+            }
+          } catch (e2) {}
+        }
+      }
     }
-    setSettings((prev) => ({ ...prev, ...s }));
+    setSettings((prev) => {
+      const next = { ...prev, ...s };
+      try {
+        localStorage.setItem('rfu-settings-cache', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     if (s.appearance) {
       if (s.appearance === 'dark') {
         document.documentElement.classList.add('dark');
@@ -2377,10 +2433,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ==================================================
 
   const getRateForKm = useCallback((km: number): number | null => {
+    if (settings.autoKmPricing === false) {
+      return null;
+    }
     const slabs = settings.kmRates || DEFAULT_KM_SLABS;
     const slab = slabs.find((s) => km >= s.minKm && km <= s.maxKm);
     return slab ? slab.rate : null;
-  }, [settings.kmRates]);
+  }, [settings.kmRates, settings.autoKmPricing]);
 
   const addKmSlab = useCallback(async (slab: Omit<KmSlab, 'id'>) => {
     const newSlab: KmSlab = { id: `km-${Date.now()}`, ...slab };

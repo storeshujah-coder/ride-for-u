@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Plus, Pencil, Trash2, Settings as SettingsIcon, KeyRound, Lock, Eye, EyeOff, Gauge, Sun, Moon } from 'lucide-react';
+import { Plus, Pencil, Trash2, Settings as SettingsIcon, KeyRound, Lock, Eye, EyeOff, Gauge, Sun, Moon, Sparkles } from 'lucide-react';
 import { useStore, DEFAULT_KM_SLABS } from '@/store/StoreContext';
 import { useToast } from '@/components/Toast';
 import { useConfirm } from '@/components/Confirm';
@@ -38,6 +38,17 @@ export function SettingsPage() {
   const [pwdLoading, setPwdLoading] = useState(false);
 
   const kmSlabs = (settings.kmRates && settings.kmRates.length > 0) ? settings.kmRates : DEFAULT_KM_SLABS;
+  const isAutoPricingOn = settings.autoKmPricing !== false;
+
+  const handleToggleAutoPricing = async () => {
+    const nextState = !isAutoPricingOn;
+    await updateSettings({ autoKmPricing: nextState });
+    if (nextState) {
+      toast('Auto KM Pricing Enabled (KM ke sath rate automatically lag jayega)', 'success');
+    } else {
+      toast('Auto KM Pricing Disabled (Ab KM ke sath automatic rate nahi lagega - manual mode)', 'info');
+    }
+  };
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -204,10 +215,66 @@ export function SettingsPage() {
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-800">Distance / KM Pricing Slabs (کلومیٹر ریٹس)</h3>
-              <p className="text-xs text-slate-500">Define payment rates for KM ranges. When entering KM in bill tables, payment auto-fills.</p>
+              <p className="text-xs text-slate-500">Define payment rates for KM ranges. When enabled, entering KM in bill tables auto-fills the price.</p>
             </div>
           </div>
           <Button size="sm" onClick={openAddKmSlab}><Plus className="w-4 h-4" /> Add KM Slab</Button>
+        </div>
+
+        {/* Auto Price Toggle Switch */}
+        <div className={`mb-5 p-4 rounded-xl border transition-all ${
+          isAutoPricingOn 
+            ? 'bg-emerald-50/70 border-emerald-200' 
+            : 'bg-amber-50/70 border-amber-200'
+        }`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition ${
+                isAutoPricingOn ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              }`}>
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-bold text-slate-800">Auto KM Price Calculation (آٹو پرائسنگ)</span>
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                    isAutoPricingOn 
+                      ? 'bg-emerald-600 text-white shadow-xs' 
+                      : 'bg-slate-500 text-white shadow-xs'
+                  }`}>
+                    {isAutoPricingOn ? '✓ AUTO ON (فعال)' : '✕ AUTO OFF (بند)'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  {isAutoPricingOn ? (
+                    <span><strong>ON:</strong> Bill ya duty entry me KM likhne se rate <strong>automatically</strong> slab ke mutabiq lag jayega.</span>
+                  ) : (
+                    <span><strong>OFF:</strong> KM likhne par automatic price <strong>nahi</strong> lagegi. Aap manually apni marzi se amount likh sakte hain.</span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              <button
+                type="button"
+                onClick={handleToggleAutoPricing}
+                className={`relative inline-flex h-7 w-14 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 ${
+                  isAutoPricingOn ? 'bg-emerald-600' : 'bg-slate-300'
+                }`}
+                role="switch"
+                aria-checked={isAutoPricingOn}
+                title={isAutoPricingOn ? 'Click to turn OFF auto-pricing' : 'Click to turn ON auto-pricing'}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isAutoPricingOn ? 'translate-x-7' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -242,6 +309,7 @@ export function SettingsPage() {
           </table>
         </div>
       </Card>
+
 
       {/* KM Slab Modal */}
       <Modal

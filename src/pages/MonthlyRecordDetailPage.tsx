@@ -625,7 +625,7 @@ export function MonthlyRecordDetailPage() {
           {entryType === 'quick' ? (
             <>
               <div className="grid grid-cols-2 gap-3">
-                <Input label="KM (Auto Rate)" type="number" value={entryKm} onChange={handleEntryKmChange} placeholder="e.g. 75" />
+                <Input label={settings.autoKmPricing !== false ? "KM (Auto Rate)" : "KM (Manual)"} type="number" value={entryKm} onChange={handleEntryKmChange} placeholder="e.g. 75" />
                 <Input label="Amount (PKR)" type="number" value={entryAmount} onChange={setEntryAmount} placeholder="10000" required />
               </div>
               <Input label="Remarks" value={entryRemarks} onChange={setEntryRemarks} placeholder="Full Day Duty" />
