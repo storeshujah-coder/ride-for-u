@@ -11,6 +11,7 @@ import type {
 import { emptyPermissions, superAdminPermissions, ALL_MODULES } from '@/types';
 import { supabase, supabaseAdminAuth } from '@/lib/supabase';
 import { playNotificationSound } from '@/utils/sound';
+import { formatMonth } from '@/utils/calc';
 
 const AUTH_STORAGE_KEY = 'rfu-auth-user';
 const NOTIFICATIONS_STORAGE_KEY = 'rfu-notifications-data';
@@ -342,6 +343,7 @@ interface StoreContextValue {
 
   getMonthlyRecord: (vehicleId: string, month: string) => MonthlyRecord | undefined;
   createMonthlyRecord: (vehicleId: string, month: string) => Promise<MonthlyRecord>;
+  deleteMonthlyRecord: (recordId: string) => Promise<void>;
   addDailyRecord: (recordId: string, dr: Omit<DailyRecord, 'id'>) => Promise<void>;
   updateDailyRecord: (recordId: string, drId: string, dr: Partial<DailyRecord>) => Promise<void>;
   deleteDailyRecord: (recordId: string, drId: string) => Promise<void>;
@@ -536,31 +538,62 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [notifications]);
 
   const loadAllData = useCallback(async () => {
-
     try {
-      const { data: v } = await supabase.from('vehicles').select('*');
+      const [
+        vehiclesRes,
+        driversRes,
+        subsRes,
+        salariesRes,
+        catsRes,
+        monthlyRecordsRes,
+        dailyRecordsRes,
+        dailyRoutesRes,
+        settingsRes,
+        expensesRes,
+        departmentsRes,
+        monthlyDeptsRes,
+        activityLogsRes,
+        notificationsRes,
+      ] = await Promise.all([
+        supabase.from('vehicles').select('*'),
+        supabase.from('drivers').select('*'),
+        supabase.from('subcontractors').select('*'),
+        supabase.from('driver_salaries').select('*'),
+        supabase.from('expense_categories').select('*'),
+        supabase.from('monthly_records').select('*'),
+        supabase.from('daily_records').select('*'),
+        supabase.from('daily_routes').select('*'),
+        supabase.from('settings').select('*').limit(1),
+        supabase.from('expenses').select('*'),
+        supabase.from('departments').select('*'),
+        supabase.from('monthly_departments').select('*'),
+        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(500),
+        supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(200),
+      ]);
+
+      const v = vehiclesRes.data;
       if (v) setVehicles(v.map(toVehicle));
 
-      const { data: d } = await supabase.from('drivers').select('*');
+      const d = driversRes.data;
       if (d) setDrivers(d.map(toDriver));
 
-      const { data: s } = await supabase.from('subcontractors').select('*');
+      const s = subsRes.data;
       if (s) setSubcontractors(s.map(toSubcontractor));
 
-      const { data: sal } = await supabase.from('driver_salaries').select('*');
+      const sal = salariesRes.data;
       if (sal) setSalaries(sal.map(toSalary));
 
-      const { data: cats } = await supabase.from('expense_categories').select('*');
+      const cats = catsRes.data;
       if (cats) setCategories(cats.map(toCategory));
 
-      const { data: mr } = await supabase.from('monthly_records').select('*');
-      const { data: drs } = await supabase.from('daily_records').select('*');
-      const { data: rts } = await supabase.from('daily_routes').select('*');
+      const setR = settingsRes.data;
+      if (setR && setR[0]) {
+        const parsedSettings = toSettings(setR[0]);
+        setSettings(parsedSettings);
+        try { localStorage.setItem('rfu-settings-cache', JSON.stringify(parsedSettings)); } catch {}
+      }
 
-      const { data: setR } = await supabase.from('settings').select('*').limit(1);
-      if (setR && setR[0]) setSettings(toSettings(setR[0]));
-
-      const { data: bex } = await supabase.from('expenses').select('*');
+      const bex = expensesRes.data;
       const vMap = new Map<string, Vehicle>();
       if (v) v.forEach((x: any) => vMap.set(String(x.id), toVehicle(x)));
       const dMap = new Map<string, Driver>();
@@ -575,36 +608,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { id: 'dept-2', name: 'Finance / Accounts', notes: 'Billing & finance' },
         { id: 'dept-3', name: 'Administration', notes: 'Admin management' },
       ];
-      try {
-        const { data: deptData } = await supabase.from('departments').select('*');
-        if (deptData && deptData.length > 0) {
-          deptList = deptData.map(toDepartment);
-        }
-      } catch {}
+      if (departmentsRes?.data && departmentsRes.data.length > 0) {
+        deptList = departmentsRes.data.map(toDepartment);
+      }
       setDepartments(deptList);
 
       const deptMap = new Map<string, Department>();
       deptList.forEach((dp) => deptMap.set(dp.id, dp));
 
-      let mDeptData: any[] = [];
-      try {
-        const { data } = await supabase.from('monthly_departments').select('*');
-        if (data) mDeptData = data;
-      } catch {}
-
-      const mrList = buildMonthlyRecords(mr || [], drs || [], rts || [], businessArr, mDeptData, deptMap);
+      const mDeptData = monthlyDeptsRes?.data || [];
+      const mrList = buildMonthlyRecords(
+        monthlyRecordsRes.data || [],
+        dailyRecordsRes.data || [],
+        dailyRoutesRes.data || [],
+        businessArr,
+        mDeptData,
+        deptMap
+      );
       setMonthlyRecords(mrList);
 
-      const { data: act } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(500);
+      const act = activityLogsRes.data;
       if (act) setActivity(act.map(toActivityLog));
 
-      // Load notifications
-      try {
-        const { data: notifs } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(200);
-        if (notifs) setNotifications(notifs.map(toNotification));
-      } catch (ne) {
-        console.warn('notifications load note:', ne);
-      }
+      const notifs = notificationsRes.data;
+      if (notifs) setNotifications(notifs.map(toNotification));
     } catch (e) {
       console.error('loadAllData error:', e);
     }
@@ -623,75 +650,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const loadUsers = useCallback(async () => {
     try {
-      const { data: profiles, error: pErr } = await supabase.from('profiles').select('*');
-      if (pErr) {
-        console.error('loadUsers profile error:', pErr);
-        return;
-      }
+      const [profilesRes, userPermsRes] = await Promise.all([
+        supabase.from('profiles').select('*'),
+        supabase.from('user_permissions').select('profile_id, permissions (module_key, action)'),
+      ]);
+
+      const profiles = profilesRes.data;
       if (!profiles) return;
 
-      const userList: User[] = [];
-      for (const p of profiles) {
+      const permsByProfile = new Map<string, any[]>();
+      if (userPermsRes?.data) {
+        userPermsRes.data.forEach((r: any) => {
+          const arr = permsByProfile.get(r.profile_id) || [];
+          arr.push(r.permissions);
+          permsByProfile.set(r.profile_id, arr);
+        });
+      }
+
+      const userList: User[] = profiles.map((p: any) => {
         let perms: PermissionSet = p.role === 'super_admin' ? superAdminPermissions() : emptyPermissions();
         if (p.role !== 'super_admin') {
-          try {
-            const { data: permData, error: rpcErr } = await supabase.rpc('get_user_permissions', { p_profile_id: p.id });
-            if (!rpcErr && permData) {
-              perms = permData as PermissionSet;
-            } else {
-              // Direct table fallback
-              const { data: upRows } = await supabase
-                .from('user_permissions')
-                .select('permission_id, permissions (module_key, action)')
-                .eq('profile_id', p.id);
-              if (upRows && upRows.length) {
-                const built = emptyPermissions();
-                upRows.forEach((r: any) => {
-                  const permObj = r.permissions;
-                  if (permObj?.module_key && permObj?.action && (built as any)[permObj.module_key]) {
-                    (built as any)[permObj.module_key][permObj.action] = true;
-                  }
-                });
-                perms = built;
-              }
-            }
-          } catch (e) {}
-        }
-        userList.push(toUser(p, perms));
-      }
-      setUsers(userList);
-    } catch (e) {
-      console.error('loadUsers error:', e);
-    }
-  }, []);
-
-  const refreshCurrentUser = useCallback(async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) {
-      setCurrentUser(null);
-      return;
-    }
-    const { data: profileRows } = await supabase.from('profiles').select('*').eq('id', authUser.id).limit(1);
-    if (!profileRows || !profileRows[0]) {
-      setCurrentUser(null);
-      return;
-    }
-    const p = profileRows[0];
-    let perms: PermissionSet = p.role === 'super_admin' ? superAdminPermissions() : emptyPermissions();
-    if (p.role !== 'super_admin') {
-      try {
-        const { data: permData, error: rpcErr } = await supabase.rpc('get_user_permissions', { p_profile_id: authUser.id });
-        if (!rpcErr && permData) {
-          perms = permData as PermissionSet;
-        } else {
-          const { data: upRows } = await supabase
-            .from('user_permissions')
-            .select('permission_id, permissions (module_key, action)')
-            .eq('profile_id', authUser.id);
-          if (upRows && upRows.length) {
+          const upRows = permsByProfile.get(p.id) || [];
+          if (upRows.length) {
             const built = emptyPermissions();
-            upRows.forEach((r: any) => {
-              const permObj = r.permissions;
+            upRows.forEach((permObj: any) => {
               if (permObj?.module_key && permObj?.action && (built as any)[permObj.module_key]) {
                 (built as any)[permObj.module_key][permObj.action] = true;
               }
@@ -699,11 +681,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             perms = built;
           }
         }
-      } catch (e) {}
+        return toUser(p, perms);
+      });
+
+      setUsers(userList);
+    } catch (e) {
+      console.error('loadUsers error:', e);
     }
-    const u = toUser(p, perms);
-    setCurrentUser(u);
-    try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u)); } catch {}
+  }, []);
+
+  const refreshCurrentUser = useCallback(async () => {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        setCurrentUser(null);
+        return;
+      }
+      const [profileRes, userPermsRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', authUser.id).limit(1),
+        supabase.from('user_permissions').select('profile_id, permissions (module_key, action)').eq('profile_id', authUser.id),
+      ]);
+
+      const profileRows = profileRes.data;
+      if (!profileRows || !profileRows[0]) {
+        return;
+      }
+      const p = profileRows[0];
+      let perms: PermissionSet = p.role === 'super_admin' ? superAdminPermissions() : emptyPermissions();
+      if (p.role !== 'super_admin') {
+        const upRows = userPermsRes?.data || [];
+        if (upRows.length) {
+          const built = emptyPermissions();
+          upRows.forEach((r: any) => {
+            const permObj = r.permissions;
+            if (permObj?.module_key && permObj?.action && (built as any)[permObj.module_key]) {
+              (built as any)[permObj.module_key][permObj.action] = true;
+            }
+          });
+          perms = built;
+        }
+      }
+      const u = toUser(p, perms);
+      setCurrentUser(u);
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
+        sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
+      } catch {}
+    } catch (e) {
+      console.warn('refreshCurrentUser error:', e);
+    }
   }, []);
 
   // Reference to Supabase realtime channel for broadcasting
@@ -715,10 +741,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         await refreshCurrentUser();
-        await loadUsers();
-        await loadAllData();
+        Promise.all([loadUsers(), loadAllData()]);
       } else {
-        await loadNotifications();
+        loadNotifications();
       }
     })();
 
@@ -731,8 +756,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } else if (event === 'SIGNED_IN' && session) {
         (async () => {
           await refreshCurrentUser();
-          await loadUsers();
-          await loadAllData();
+          Promise.all([loadUsers(), loadAllData()]);
         })();
       }
     });
@@ -1033,18 +1057,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     if (!data.user) return null;
 
-    const { data: profileRows, error: profileErr } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', data.user.id)
-      .limit(1);
+    const [profileRes, userPermsRes] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', data.user.id).limit(1),
+      supabase.from('user_permissions').select('permission_id, permissions (module_key, action)').eq('profile_id', data.user.id),
+    ]);
 
-    if (profileErr) {
-      console.error('Profile fetch error:', profileErr);
-      throw new Error(`Failed to load user profile: ${profileErr.message}`);
+    if (profileRes.error) {
+      console.error('Profile fetch error:', profileRes.error);
+      throw new Error(`Failed to load user profile: ${profileRes.error.message}`);
     }
 
-    let p = profileRows?.[0];
+    let p = profileRes.data?.[0];
     if (!p) {
       // Auto-create missing profile record
       const fallbackPayload = {
@@ -1065,34 +1088,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     let perms: PermissionSet = p.role === 'super_admin' ? superAdminPermissions() : emptyPermissions();
     if (p.role !== 'super_admin') {
-      try {
-        const { data: permData, error: rpcErr } = await supabase.rpc('get_user_permissions', { p_profile_id: data.user.id });
-        if (!rpcErr && permData) {
-          perms = permData as PermissionSet;
-        } else {
-          const { data: upRows } = await supabase
-            .from('user_permissions')
-            .select('permission_id, permissions (module_key, action)')
-            .eq('profile_id', data.user.id);
-          if (upRows && upRows.length) {
-            const built = emptyPermissions();
-            upRows.forEach((r: any) => {
-              const permObj = r.permissions;
-              if (permObj?.module_key && permObj?.action && (built as any)[permObj.module_key]) {
-                (built as any)[permObj.module_key][permObj.action] = true;
-              }
-            });
-            perms = built;
+      const upRows = userPermsRes?.data || [];
+      if (upRows.length) {
+        const built = emptyPermissions();
+        upRows.forEach((r: any) => {
+          const permObj = r.permissions;
+          if (permObj?.module_key && permObj?.action && (built as any)[permObj.module_key]) {
+            (built as any)[permObj.module_key][permObj.action] = true;
           }
-        }
-      } catch (e) {}
+        });
+        perms = built;
+      }
     }
 
     const u = toUser(p, perms);
     setCurrentUser(u);
-    try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u)); } catch {}
-    await loadUsers();
-    await loadAllData();
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
+      sessionStorage.setItem('rfu-auth', 'true');
+    } catch {}
+
+    // Run data fetching in background asynchronously so signin responds instantly (< 1s)
+    Promise.all([loadUsers(), loadAllData()]);
+
     return u;
   }, [loadUsers, loadAllData]);
 
@@ -1878,6 +1897,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [monthlyRecords, vehicles, currentUser, logActivity, createNotification]);
 
+  const deleteMonthlyRecord = useCallback(async (recordId: string) => {
+    const rec = monthlyRecords.find((r) => r.id === recordId);
+    const vehicle = vehicles.find((v) => v.id === rec?.vehicleId);
+    const title = `${vehicle?.number || 'Vehicle'} (${rec ? formatMonth(rec.month) : 'Monthly Bill'})`;
+
+    try {
+      await supabase.from('monthly_departments').delete().eq('monthly_record_id', recordId);
+      const { data: drList } = await supabase.from('daily_records').select('id').eq('monthly_record_id', recordId);
+      if (drList && drList.length > 0) {
+        const drIds = drList.map((d: any) => d.id);
+        await supabase.from('daily_routes').delete().in('daily_record_id', drIds);
+        await supabase.from('daily_records').delete().eq('monthly_record_id', recordId);
+      }
+      await supabase.from('monthly_records').delete().eq('id', recordId);
+    } catch (e) {
+      console.warn('deleteMonthlyRecord DB error:', e);
+    }
+
+    setMonthlyRecords((prev) => prev.filter((r) => r.id !== recordId));
+    logActivity({ action: `Deleted monthly record for ${title}`, entity: 'monthly-record', entityId: recordId });
+
+    const actor = currentUser?.fullName || (currentUser?.role === 'super_admin' ? 'Super Admin' : 'Staff');
+    createNotification({
+      action: 'DELETE',
+      entityType: 'monthly_record',
+      entityId: recordId,
+      entityTitle: title,
+      message: `${actor} deleted monthly bill record for ${title}`,
+      targetUrl: `/monthly-records`,
+    });
+  }, [monthlyRecords, vehicles, currentUser, logActivity, createNotification]);
+
   // ==================================================
   // EXPENSES (old vehicle-monthly expenses mapped to business expenses for Vehicle)
   // ==================================================
@@ -2474,7 +2525,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addDriver, updateDriver, deleteDriver,
     addSubcontractor, updateSubcontractor, deleteSubcontractor,
     addSalary, updateSalary, deleteSalary,
-    getMonthlyRecord, createMonthlyRecord, addDailyRecord, updateDailyRecord, deleteDailyRecord,
+    getMonthlyRecord, createMonthlyRecord, deleteMonthlyRecord, addDailyRecord, updateDailyRecord, deleteDailyRecord,
     addExpense, updateExpense, deleteExpense,
     getAllExpenses, addStandaloneExpense, updateStandaloneExpense, deleteStandaloneExpense,
     addBusinessExpense, updateBusinessExpense, deleteBusinessExpense,

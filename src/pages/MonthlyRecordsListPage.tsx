@@ -1,9 +1,12 @@
 import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Calendar, Filter, X, Car } from 'lucide-react';
+import { Plus, Search, FileText, Calendar, Filter, X, Car, Trash2 } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
-import { PageHeader, Card, Button, EmptyState } from '@/components/ui';
+import { useConfirm } from '@/components/Confirm';
+import { useToast } from '@/components/Toast';
+import { PageHeader, Card, Button, SearchableSelect, type SearchableOption, EmptyState } from '@/components/ui';
 import { formatPKR, formatMonth, totalDuty, totalExpenses } from '@/utils/calc';
+import type { MonthlyRecord } from '@/types';
 
 const MONTH_NAMES = [
   { value: '', label: 'All Months' },
@@ -22,8 +25,10 @@ const MONTH_NAMES = [
 ];
 
 export function MonthlyRecordsListPage() {
-  const { monthlyRecords, vehicles } = useStore();
+  const { monthlyRecords, vehicles, deleteMonthlyRecord, canDeleteRecord } = useStore();
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const [search, setSearch] = useState('');
   const [vehicleFilter, setVehicleFilter] = useState('');
@@ -42,6 +47,18 @@ export function MonthlyRecordsListPage() {
     });
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   }, [monthlyRecords]);
+
+  const vehicleOptions: SearchableOption[] = useMemo(() => {
+    return [
+      { value: '', label: 'All Vehicles (تمام گاڑیاں)' },
+      ...vehicles.map((v) => ({
+        value: v.id,
+        label: `${v.number} — ${v.model || v.type}`,
+        subLabel: `${v.type} · ${v.ownerType}`,
+        badge: v.status,
+      })),
+    ];
+  }, [vehicles]);
 
   const hasActiveFilters = Boolean(search || vehicleFilter || selectedYear || selectedMonth);
 
@@ -80,6 +97,21 @@ export function MonthlyRecordsListPage() {
   const filteredTotalExpenses = useMemo(() => {
     return filtered.reduce((s, r) => s + totalExpenses(r), 0);
   }, [filtered]);
+
+  const handleDeleteRecord = (r: MonthlyRecord) => {
+    const v = vehicles.find((x) => x.id === r.vehicleId);
+    const vehicleLabel = v?.number || 'Vehicle';
+    const monthLabel = formatMonth(r.month);
+
+    confirm({
+      title: 'Delete Monthly Record (بل ڈیلیٹ کریں)',
+      message: `Are you sure you want to delete the monthly record for ${vehicleLabel} (${monthLabel})? This will permanently delete all daily duty entries, routes, and department payment allocations for this month.`,
+      onConfirm: async () => {
+        await deleteMonthlyRecord(r.id);
+        toast(`Monthly record for ${vehicleLabel} (${monthLabel}) deleted`, 'success');
+      },
+    });
+  };
 
   return (
     <div>
@@ -127,20 +159,16 @@ export function MonthlyRecordsListPage() {
               />
             </div>
 
-            {/* Vehicle Select Filter */}
+            {/* Vehicle Searchable Select Filter */}
             <div className="relative">
-              <select
+              <SearchableSelect
                 value={vehicleFilter}
-                onChange={(e) => setVehicleFilter(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-              >
-                <option value="">All Vehicles</option>
-                {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.number} ({v.model})
-                  </option>
-                ))}
-              </select>
+                onChange={setVehicleFilter}
+                options={vehicleOptions}
+                placeholder="All Vehicles"
+                searchPlaceholder="Search vehicle number or model..."
+                emptyText="No vehicles found"
+              />
             </div>
 
             {/* Year Filter */}
@@ -291,13 +319,24 @@ export function MonthlyRecordsListPage() {
                         {formatPKR(totalExpenses(r))}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        <Link
-                          to={`/monthly-records/${r.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-xs text-sky-600 hover:text-sky-800 font-semibold px-2.5 py-1.5 rounded bg-sky-50 hover:bg-sky-100 transition"
-                        >
-                          View Bill →
-                        </Link>
+                        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <Link
+                            to={`/monthly-records/${r.id}`}
+                            className="text-xs text-sky-600 hover:text-sky-800 font-semibold px-2.5 py-1.5 rounded bg-sky-50 hover:bg-sky-100 transition"
+                          >
+                            View Bill →
+                          </Link>
+                          {canDeleteRecord(r) && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRecord(r)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
+                              title="Delete Monthly Record"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

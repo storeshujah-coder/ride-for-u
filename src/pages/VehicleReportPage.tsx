@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Printer, FileText, Eye, EyeOff, Percent, Receipt, Building2, Pencil } from 'lucide-react';
 import { useStore } from '@/store/StoreContext';
 import { useToast } from '@/components/Toast';
-import { PageHeader, Card, Button, Select, EmptyState, Input } from '@/components/ui';
+import { PageHeader, Card, Button, Select, SearchableSelect, EmptyState, Input } from '@/components/ui';
 import { Modal } from '@/components/Modal';
 import {
   formatPKR, formatMonth, formatDate, formatDateLong, dailyTotal,
@@ -193,13 +193,20 @@ export function VehicleReportPage() {
 
       <Card className="p-5 mb-6 print:hidden">
         <div className="grid sm:grid-cols-2 gap-4 mb-4">
-          <Select
+          <SearchableSelect
             label="Vehicle"
             value={vehicleId}
             onChange={setVehicleId}
-            options={vehicles.map((v) => ({ value: v.id, label: `${v.number} — ${v.model}` }))}
+            options={vehicles.map((v) => ({
+              value: v.id,
+              label: `${v.number} — ${v.model || v.type}`,
+              subLabel: `${v.type} · ${v.ownerType}`,
+              badge: v.status,
+            }))}
             placeholder="Select vehicle"
+            searchPlaceholder="Search vehicle number or model..."
             required
+            emptyText="No vehicles found"
           />
           <Select
             label="Month"

@@ -4,7 +4,7 @@ import { Plus, Pencil, Trash2, FileText, Wallet, Route, Zap, Building2 } from 'l
 import { useStore } from '@/store/StoreContext';
 import { useConfirm } from '@/components/Confirm';
 import { useToast } from '@/components/Toast';
-import { PageHeader, Card, Button, Input, Select, Textarea } from '@/components/ui';
+import { PageHeader, Card, Button, Input, Select, Textarea, RouteLocationInput } from '@/components/ui';
 import { Modal } from '@/components/Modal';
 import { formatPKR, formatMonth, formatDate, totalDuty, totalExpenses, dailyTotal, commissionAmount, afterCommission, generateMonthOptions, daysInMonth } from '@/utils/calc';
 import type { DailyRecord, RouteEntry, Department, DepartmentEntry } from '@/types';
@@ -14,7 +14,7 @@ export function MonthlyRecordDetailPage() {
   const navigate = useNavigate();
   const {
     monthlyRecords, vehicles, drivers, categories, departments, settings,
-    createMonthlyRecord, addDailyRecord, updateDailyRecord, deleteDailyRecord,
+    createMonthlyRecord, deleteMonthlyRecord, addDailyRecord, updateDailyRecord, deleteDailyRecord,
     addExpense, updateExpense, deleteExpense, addCategory, updateCategory, deleteCategory,
     addDepartment, updateDepartment, deleteDepartment,
     addDepartmentEntry, updateDepartmentEntry, deleteDepartmentEntry,
@@ -331,13 +331,38 @@ export function MonthlyRecordDetailPage() {
     { label: 'Final Amount', value: formatPKR(final), bold: true, highlight: true },
   ];
 
+  const handleDeleteRecord = () => {
+    const vehicleLabel = vehicle?.number || 'Vehicle';
+    const monthLabel = formatMonth(record.month);
+    confirm({
+      title: 'Delete Monthly Record (بل ڈیلیٹ کریں)',
+      message: `Are you sure you want to delete this monthly record for ${vehicleLabel} (${monthLabel})? This will permanently delete all daily duty entries, routes, and department payment allocations for this month.`,
+      onConfirm: async () => {
+        await deleteMonthlyRecord(record.id);
+        toast(`Monthly record for ${vehicleLabel} (${monthLabel}) deleted`, 'success');
+        navigate('/monthly-records');
+      },
+    });
+  };
+
   return (
     <div>
       <PageHeader
         title={`${vehicle?.number || 'Vehicle'} — ${formatMonth(record.month)}`}
         subtitle={driver ? `Driver: ${driver.fullName}` : 'No driver assigned'}
         backTo="/monthly-records"
-        action={<Link to={`/reports/vehicle?vehicle=${record.vehicleId}&month=${record.month}`}><Button variant="secondary">View Report</Button></Link>}
+        action={
+          <div className="flex items-center gap-2">
+            <Link to={`/reports/vehicle?vehicle=${record.vehicleId}&month=${record.month}`}>
+              <Button variant="secondary">View Report</Button>
+            </Link>
+            {canDeleteRecord(record) && (
+              <Button variant="danger" onClick={handleDeleteRecord}>
+                <Trash2 className="w-4 h-4" /> Delete Bill
+              </Button>
+            )}
+          </div>
+        }
       />
 
       {/* Summary */}
@@ -639,12 +664,13 @@ export function MonthlyRecordDetailPage() {
               <div className="space-y-2">
                 {routes.map((r) => (
                   <div key={r.id} className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={r.location}
-                      onChange={(e) => updateRoute(r.id, { location: e.target.value })}
-                      placeholder="Factory → DHA"
-                      className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                    <RouteLocationInput
+                      location={r.location}
+                      onChange={(newLoc) => updateRoute(r.id, { location: newLoc })}
+                      startPlaceholder="Start (e.g. Factory)"
+                      endPlaceholder="Destination (e.g. DHA)"
+                      size="md"
+                      className="flex-1"
                     />
                     <input
                       type="number"
@@ -661,7 +687,14 @@ export function MonthlyRecordDetailPage() {
                       placeholder="3000"
                       className="w-24 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 font-medium"
                     />
-                    <button onClick={() => removeRoute(r.id)} className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <button
+                      type="button"
+                      onClick={() => removeRoute(r.id)}
+                      className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
+                      title="Remove Route"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 ))}
                 {routes.length === 0 && <p className="text-sm text-slate-400 text-center py-2">No routes added yet.</p>}
