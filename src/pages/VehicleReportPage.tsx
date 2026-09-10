@@ -337,11 +337,10 @@ export function VehicleReportPage() {
           {/* Vehicle Information */}
           <div className="mb-6">
             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3">Vehicle Information</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <div className="grid grid-cols-3 gap-3 text-sm">
               <div><p className="text-xs text-slate-500">Vehicle Number</p><p className="font-medium text-slate-800">{vehicle.number}</p></div>
-              <div><p className="text-xs text-slate-500">Type</p><p className="font-medium text-slate-800">{vehicle.type}</p></div>
               <div><p className="text-xs text-slate-500">Owner</p><p className="font-medium text-slate-800">{owner}</p></div>
-              <div><p className="text-xs text-slate-500">Driver</p><p className="font-medium text-slate-800">{driver?.fullName || '—'}</p></div>
+              <div><p className="text-xs text-slate-500">Model</p><p className="font-medium text-slate-800">{vehicle.model || '—'}</p></div>
             </div>
           </div>
 
